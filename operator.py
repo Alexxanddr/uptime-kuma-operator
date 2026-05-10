@@ -1,6 +1,7 @@
 import os
 import kopf
 import logging
+import sys
 from uptime_kuma_api import UptimeKumaApi, MonitorType
 
 # Configuration from Environment Variables
@@ -22,7 +23,11 @@ def get_monitor_name(name, namespace):
 
 def parse_annotations(annotations):
     """Extract monitor configuration from Deployment annotations."""
-    if not annotations or annotations.get(f"{ANNOTATION_PREFIX}/enabled") != "true":
+    if not annotations:
+        return None
+        
+    enabled = annotations.get(f"{ANNOTATION_PREFIX}/enabled", "false").lower() == "true"
+    if not enabled:
         return None
     
     return {
@@ -50,15 +55,20 @@ def sync_monitor(api, monitor_name, config, logger):
     # Resolve notification IDs by name
     notification_ids = []
     if config["notifications"]:
-        all_notifs = api.get_notifications()
-        for n_name in config["notifications"]:
-            n_name = n_name.strip()
-            if not n_name: continue
-            notif = next((n for n in all_notifs if n['name'] == n_name), None)
-            if notif:
-                notification_ids.append(notif['id'])
+        try:
+            all_notifs = api.get_notifications()
+            for n_name in config["notifications"]:
+                n_name = n_name.strip()
+                if not n_name: continue
+                notif = next((n for n in all_notifs if n['name'] == n_name), None)
+                if notif:
+                    notification_ids.append(notif['id'])
+                else:
+                    logger.warning(f"Notification group not found in Uptime Kuma: {n_name}")
+        except Exception as e:
+            logger.error(f"Failed to fetch notifications: {str(e)}")
 
-    # Build common monitor arguments
+    # Build monitor arguments
     args = {
         "type": type_map.get(config["type"], MonitorType.HTTP),
         "name": monitor_name,
@@ -67,35 +77,43 @@ def sync_monitor(api, monitor_name, config, logger):
         "notificationIDList": notification_ids
     }
 
-    # Set type-specific fields
-    m_type = config["type"]
-    if m_type == "http":
+    if config["type"] == "http":
+        if not config["url"]:
+            raise ValueError(f"URL is required for http type in {monitor_name}")
         args["url"] = config["url"]
-    elif m_type in ["port", "ping", "dns"]:
+    elif config["type"] in ["port", "ping", "dns"]:
+        if not config["hostname"]:
+            raise ValueError(f"Hostname is required for {config['type']} type in {monitor_name}")
         args["hostname"] = config["hostname"]
-        if m_type == "port":
+        if config["type"] == "port" and config["port"]:
             args["port"] = config["port"]
 
     if existing:
-        logger.info(f"Updating existing monitor: {monitor_name}")
+        logger.info(f"Updating existing monitor: {monitor_name} (ID: {existing['id']})")
         api.edit_monitor(existing['id'], **args)
     else:
         logger.info(f"Creating new monitor: {monitor_name}")
         api.add_monitor(**args)
 
 @kopf.on.startup()
-def configure(settings: kopf.OperatorSettings, **_):
-    """Log startup message and configure logging."""
-    logging.info("KumaOps Operator is starting...")
-    logging.info(f"Connecting to Uptime Kuma at {KUMA_URL}")
+def on_startup(logger, **kwargs):
+    logger.info("--- KumaOps Operator Starting ---")
+    logger.info(f"Target Uptime Kuma: {KUMA_URL}")
+    logger.info(f"User: {KUMA_USER}")
+    
+    try:
+        with get_api() as api:
+            api.get_monitors()
+            logger.info("Connection test to Uptime Kuma: SUCCESSFUL")
+    except Exception as e:
+        logger.error(f"Connection test to Uptime Kuma: FAILED - {str(e)}")
 
-@kopf.on.create('apps', 'v1', 'deployments')
-@kopf.on.update('apps', 'v1', 'deployments')
-@kopf.on.resume('apps', 'v1', 'deployments')
-def reconcile(name, namespace, body, logger, **kwargs):
+@kopf.on.resume('deployments')
+@kopf.on.create('deployments')
+@kopf.on.update('deployments')
+def reconcile(name, namespace, annotations, logger, **kwargs):
     """Reconcile Deployment annotations with Uptime Kuma monitors."""
-    annotations = body.get('metadata', {}).get('annotations', {})
-    logger.info(f"Reconciling Deployment {namespace}/{name}")
+    logger.info(f"Processing Deployment: {namespace}/{name}")
     
     config = parse_annotations(annotations)
     monitor_name = get_monitor_name(name, namespace)
@@ -103,24 +121,24 @@ def reconcile(name, namespace, body, logger, **kwargs):
     try:
         with get_api() as api:
             if config:
-                logger.info(f"Found active monitor configuration for {monitor_name}")
+                logger.info(f"Monitor enabled for {monitor_name}. Syncing...")
                 sync_monitor(api, monitor_name, config, logger)
             else:
-                logger.debug(f"No active monitor configuration for {monitor_name}, ensuring it doesn't exist.")
+                logger.debug(f"No configuration for {monitor_name}. Ensuring it doesn't exist.")
                 delete_monitor_logic(api, monitor_name, logger)
     except Exception as e:
-        logger.error(f"Reconciliation failed for {monitor_name}: {str(e)}")
+        logger.error(f"Error during reconciliation for {monitor_name}: {str(e)}")
 
-@kopf.on.delete('apps', 'v1', 'deployments')
+@kopf.on.delete('deployments')
 def on_delete(name, namespace, logger, **kwargs):
     """Delete the monitor when the Deployment is deleted."""
     monitor_name = get_monitor_name(name, namespace)
-    logger.info(f"Deployment {namespace}/{name} deleted. Removing monitor {monitor_name}")
+    logger.info(f"Deployment {namespace}/{name} deleted. Removing monitor if exists.")
     try:
         with get_api() as api:
             delete_monitor_logic(api, monitor_name, logger)
     except Exception as e:
-        logger.error(f"Deletion failed for {monitor_name}: {str(e)}")
+        logger.error(f"Error during deletion for {monitor_name}: {str(e)}")
 
 def delete_monitor_logic(api, monitor_name, logger):
     """Internal logic to delete a monitor by name."""
@@ -128,4 +146,6 @@ def delete_monitor_logic(api, monitor_name, logger):
     existing = next((m for m in monitors if m['name'] == monitor_name), None)
     if existing:
         api.delete_monitor(existing['id'])
-        logger.info(f"Monitor {monitor_name} deleted successfully.")
+        logger.info(f"Monitor {monitor_name} removed from Uptime Kuma.")
+    else:
+        logger.debug(f"Monitor {monitor_name} not found, nothing to delete.")
