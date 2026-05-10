@@ -6,10 +6,12 @@ metadata:
   annotations:
     uptime-kuma.io/enabled: "true"
     uptime-kuma.io/type: "http"
-    uptime-kuma.io/url: "https://my-service.default.svc.cluster.local"
+    uptime-kuma.io/url: "http://sample-app.default.svc.cluster.local"
     uptime-kuma.io/interval: "60"
     uptime-kuma.io/retries: "3"
     uptime-kuma.io/notifications: "Slack Alerts, Email Admins"
+    uptime-kuma.io/group: "Production Services"
+    uptime-kuma.io/accepted-status-codes: "200-299,401,403"
 spec:
   replicas: 1
   selector:
@@ -23,3 +25,5 @@ spec:
       containers:
       - name: nginx
         image: nginx:latest
+        ports:
+        - containerPort: 80

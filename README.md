@@ -6,8 +6,10 @@ A lightweight Kubernetes Operator built with **Python** and **Kopf** that automa
 
 - **Automated Lifecycle**: Creates, updates, and deletes monitors automatically when Deployments change.
 - **Cluster-Wide**: Watches all namespaces by default.
-- **Support for Multiple Types**: Supports `HTTP`, `TCP (Port)`, `Ping`, and `DNS`.
+- **Support for Multiple Types**: Supports `HTTP`, `TCP (Port)`, `Ping`, `DNS`, `MySQL`, `PostgreSQL`, `MongoDB`, and `Redis`.
 - **Notification Integration**: Link monitors to existing Uptime Kuma notification groups by name.
+- **Monitor Groups**: Automatically assign monitors to parent groups.
+- **Custom Status Codes**: Define accepted HTTP status codes.
 - **Secure**: Credentials handled via Kubernetes Secrets.
 - **Idempotent**: Uses a predictable naming convention (`k8s-{namespace}-{name}`) to prevent duplicates.
 
@@ -38,23 +40,33 @@ metadata:
     uptime-kuma.io/interval: "60"
     uptime-kuma.io/retries: "3"
     uptime-kuma.io/notifications: "Slack, Email Admin"
+    uptime-kuma.io/group: "Web Services"
+    uptime-kuma.io/accepted-status-codes: "200-299,401"
 ```
+
+### Supported Annotations
 
 | Annotation | Description | Default |
 | :--- | :--- | :--- |
 | `uptime-kuma.io/enabled` | `"true"` to enable monitoring. | `false` |
-| `uptime-kuma.io/type` | Type: `http`, `port`, `ping`, `dns`. | `http` |
+| `uptime-kuma.io/type` | `http`, `port`, `ping`, `dns`, `mysql`, `postgresql`, `mongodb`, `redis`. | `http` |
 | `uptime-kuma.io/url` | Full URL (for `http`). | - |
-| `uptime-kuma.io/hostname` | Hostname/IP (for `port`, `ping`, `dns`). | - |
-| `uptime-kuma.io/port` | Port number (for `port`). | `80` |
+| `uptime-kuma.io/hostname` | Hostname/IP (for `port`, `ping`, `dns`, `mysql`, `postgresql`, `redis`). | - |
+| `uptime-kuma.io/port` | Port number (for `port`, `mysql`, `postgresql`, `redis`). | - |
 | `uptime-kuma.io/interval` | Heartbeat interval (sec). | `60` |
-| `uptime-kuma.io/retries` | Maximum retries. | `3` |
+| `uptime-kuma.io/retries` | Maximum retries before down. | `3` |
 | `uptime-kuma.io/notifications` | Notification names (comma-separated). | - |
+| `uptime-kuma.io/group` | Parent group name in Uptime Kuma. | - |
+| `uptime-kuma.io/accepted-status-codes` | Accepted HTTP codes (e.g. `200-299`, `200,201`). | `200-299` |
+| `uptime-kuma.io/db-user` | Database username. | - |
+| `uptime-kuma.io/db-password` | Database password. | - |
+| `uptime-kuma.io/db-name` | Database name. | - |
+| `uptime-kuma.io/db-connection-string` | Connection string (required for `mongodb`). | - |
 
 ## 🛠 Technical Details
 - **Framework**: [Kopf](https://kopf.readthedocs.io/)
 - **API Client**: [uptime-kuma-api-v2](https://github.com/exaland/uptime-kuma-api-v2)
-- **Protocol**: Socket.IO
+- **Protocol**: Socket.IO (Persistent connection managed by the operator)
 
 ## 🤝 Contributing
 Contributions are welcome! Feel free to open an Issue or a Pull Request.

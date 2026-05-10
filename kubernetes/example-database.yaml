@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-db
+  namespace: default
+  annotations:
+    uptime-kuma.io/enabled: "true"
+    uptime-kuma.io/type: "postgresql"
+    uptime-kuma.io/hostname: "postgres-db.default.svc.cluster.local"
+    uptime-kuma.io/port: "5432"
+    uptime-kuma.io/interval: "120"
+    uptime-kuma.io/db-user: "postgres"
+    uptime-kuma.io/db-password: "mypassword"
+    uptime-kuma.io/db-name: "postgres"
+    uptime-kuma.io/group: "Databases"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        env:
+        - name: POSTGRES_PASSWORD
+          value: "mypassword"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-db
+  namespace: default
+  annotations:
+    uptime-kuma.io/enabled: "true"
+    uptime-kuma.io/type: "mongodb"
+    uptime-kuma.io/db-connection-string: "mongodb://user:pass@mongodb.default:27017/admin"
+    uptime-kuma.io/group: "Databases"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:latest

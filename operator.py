@@ -4,6 +4,7 @@ import logging
 import sys
 import threading
 import time
+import json
 from uptime_kuma_api import UptimeKumaApi, MonitorType
 
 # Configuration
@@ -54,7 +55,6 @@ class KumaManager:
     def get_api(self):
         with self.lock:
             # Reconnect if never connected or if inactive for too long (e.g. 5 mins)
-            # or if the socket says it's not connected (if we can detect it)
             if not self.api:
                 self._connect()
             
@@ -88,10 +88,17 @@ def parse_annotations(annotations):
             "type": annotations.get(f"{ANNOTATION_PREFIX}/type", "http").lower(),
             "url": annotations.get(f"{ANNOTATION_PREFIX}/url"),
             "hostname": annotations.get(f"{ANNOTATION_PREFIX}/hostname"),
-            "port": int(annotations.get(f"{ANNOTATION_PREFIX}/port", 80)) if annotations.get(f"{ANNOTATION_PREFIX}/port") else None,
+            "port": int(annotations.get(f"{ANNOTATION_PREFIX}/port")) if annotations.get(f"{ANNOTATION_PREFIX}/port") else None,
             "interval": int(annotations.get(f"{ANNOTATION_PREFIX}/interval", 60)),
             "maxretries": int(annotations.get(f"{ANNOTATION_PREFIX}/retries", 3)),
-            "notifications": [n.strip() for n in annotations.get(f"{ANNOTATION_PREFIX}/notifications", "").split(",") if n.strip()]
+            "notifications": [n.strip() for n in annotations.get(f"{ANNOTATION_PREFIX}/notifications", "").split(",") if n.strip()],
+            "group": annotations.get(f"{ANNOTATION_PREFIX}/group"),
+            "accepted_status_codes": annotations.get(f"{ANNOTATION_PREFIX}/accepted-status-codes", "200-299"),
+            # Database credentials
+            "db_user": annotations.get(f"{ANNOTATION_PREFIX}/db-user"),
+            "db_password": annotations.get(f"{ANNOTATION_PREFIX}/db-password"),
+            "db_name": annotations.get(f"{ANNOTATION_PREFIX}/db-name"),
+            "db_connection_string": annotations.get(f"{ANNOTATION_PREFIX}/db-connection-string")
         }
         return config
     except Exception as e:
@@ -106,9 +113,14 @@ def sync_monitor(api, monitor_name, config, logger):
         "http": MonitorType.HTTP,
         "port": MonitorType.PORT,
         "ping": MonitorType.PING,
-        "dns": MonitorType.DNS
+        "dns": MonitorType.DNS,
+        "mysql": MonitorType.MYSQL,
+        "postgresql": MonitorType.POSTGRESQL,
+        "mongodb": MonitorType.MONGODB,
+        "redis": MonitorType.REDIS
     }
 
+    # Resolve notification IDs
     notification_ids = []
     if config["notifications"]:
         try:
@@ -122,26 +134,76 @@ def sync_monitor(api, monitor_name, config, logger):
         except Exception as e:
             logger.error(f"Notification fetch error: {e}")
 
+    # Resolve Group ID
+    parent_id = None
+    if config["group"]:
+        try:
+            # Group is a monitor with type 'group'
+            groups = [m for m in monitors if m['type'] == 'group']
+            group_obj = next((g for g in groups if g['name'] == config["group"]), None)
+            if group_obj:
+                parent_id = group_obj['id']
+            else:
+                logger.info(f"Group '{config['group']}' not found. It must be created manually in Uptime Kuma first.")
+        except Exception as e:
+            logger.error(f"Error resolving group: {e}")
+
+    # Prepare arguments
     args = {
         "type": type_map.get(config["type"], MonitorType.HTTP),
         "name": monitor_name,
         "interval": config["interval"],
         "maxretries": config["maxretries"],
-        "notificationIDList": notification_ids
+        "notificationIDList": notification_ids,
+        "parent": parent_id
     }
 
-    if config["type"] == "http":
+    # Handle Type-Specific Fields
+    m_type = config["type"]
+    
+    if m_type == "http":
         if not config["url"]:
              logger.error(f"URL missing for {monitor_name}")
              return
         args["url"] = config["url"]
-    else:
+        # Process accepted status codes into JSON list
+        status_codes = [s.strip() for s in config["accepted_status_codes"].split(",")]
+        args["accepted_statuscodes_json"] = json.dumps(status_codes)
+    
+    elif m_type in ["port", "ping", "dns"]:
         if not config["hostname"]:
              logger.error(f"Hostname missing for {monitor_name}")
              return
         args["hostname"] = config["hostname"]
-        if config["type"] == "port":
+        if m_type == "port" and config["port"]:
             args["port"] = config["port"]
+            
+    elif m_type in ["mysql", "postgresql"]:
+        if not config["hostname"]:
+             logger.error(f"Hostname missing for {monitor_name}")
+             return
+        args["hostname"] = config["hostname"]
+        args["port"] = config["port"] or (3306 if m_type == "mysql" else 5432)
+        args["database_username"] = config["db_user"]
+        args["database_password"] = config["db_password"]
+        if config["db_name"]:
+            args["database_name"] = config["db_name"]
+        if config["db_connection_string"]:
+            args["database_connection_string"] = config["db_connection_string"]
+            
+    elif m_type == "mongodb":
+        if not config["db_connection_string"]:
+             logger.error(f"MongoDB connection string missing for {monitor_name}")
+             return
+        args["database_connection_string"] = config["db_connection_string"]
+        
+    elif m_type == "redis":
+        if not config["hostname"]:
+             logger.error(f"Hostname missing for {monitor_name}")
+             return
+        args["hostname"] = config["hostname"]
+        args["port"] = config["port"] or 6379
+        args["database_password"] = config["db_password"]
 
     if existing:
         logger.info(f"UPDATING monitor: {monitor_name}")
