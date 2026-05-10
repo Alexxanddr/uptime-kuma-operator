@@ -2,6 +2,8 @@ import os
 import kopf
 import logging
 import sys
+import threading
+import time
 from uptime_kuma_api import UptimeKumaApi, MonitorType
 
 # Configuration
@@ -17,8 +19,58 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     stream=sys.stdout
 )
-# Force kopf logs to respect our level too
+
+# Silence noisy secondary loggers
 logging.getLogger('kopf').setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+logging.getLogger('engineio').setLevel(logging.WARNING)
+logging.getLogger('socketio').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+class KumaManager:
+    """Manages a persistent connection to Uptime Kuma with thread-safe access."""
+    def __init__(self):
+        self.api = None
+        self.lock = threading.Lock()
+        self._last_use = 0
+
+    def _connect(self):
+        try:
+            if self.api:
+                try:
+                    self.api.disconnect()
+                except:
+                    pass
+            
+            logging.info(f"Connecting to Uptime Kuma at {KUMA_URL}...")
+            self.api = UptimeKumaApi(KUMA_URL)
+            self.api.login(KUMA_USER, KUMA_PASS)
+            self._last_use = time.time()
+            logging.info("Connected and logged in successfully.")
+        except Exception as e:
+            logging.error(f"Failed to connect to Uptime Kuma: {e}")
+            self.api = None
+            raise
+
+    def get_api(self):
+        with self.lock:
+            # Reconnect if never connected or if inactive for too long (e.g. 5 mins)
+            # or if the socket says it's not connected (if we can detect it)
+            if not self.api:
+                self._connect()
+            
+            # Simple check if connection is still alive by doing a lightweight call
+            try:
+                # If it's been more than 60 seconds, check if alive
+                if time.time() - self._last_use > 60:
+                    self.api.get_monitors()
+            except Exception:
+                logging.warning("Connection lost, reconnecting...")
+                self._connect()
+            
+            self._last_use = time.time()
+            return self.api
+
+kuma_manager = KumaManager()
 
 def get_monitor_name(name, namespace):
     return f"k8s-{namespace}-{name}"
@@ -45,26 +97,6 @@ def parse_annotations(annotations):
     except Exception as e:
         logging.error(f"Error parsing annotations: {e}")
         return None
-
-class KumaSession:
-    def __init__(self):
-        self.api = None
-
-    def __enter__(self):
-        try:
-            self.api = UptimeKumaApi(KUMA_URL)
-            self.api.login(KUMA_USER, KUMA_PASS)
-            return self.api
-        except Exception as e:
-            logging.error(f"Uptime Kuma Login Error: {e}")
-            raise
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.api:
-            try:
-                self.api.disconnect()
-            except:
-                pass
 
 def sync_monitor(api, monitor_name, config, logger):
     monitors = api.get_monitors()
@@ -99,37 +131,40 @@ def sync_monitor(api, monitor_name, config, logger):
     }
 
     if config["type"] == "http":
+        if not config["url"]:
+             logger.error(f"URL missing for {monitor_name}")
+             return
         args["url"] = config["url"]
     else:
+        if not config["hostname"]:
+             logger.error(f"Hostname missing for {monitor_name}")
+             return
         args["hostname"] = config["hostname"]
         if config["type"] == "port":
             args["port"] = config["port"]
 
     if existing:
-        logger.info(f"UPDATING {monitor_name} (ID: {existing['id']})")
+        logger.info(f"UPDATING monitor: {monitor_name}")
         api.edit_monitor(existing['id'], **args)
     else:
-        logger.info(f"CREATING {monitor_name}")
+        logger.info(f"CREATING monitor: {monitor_name}")
         api.add_monitor(**args)
 
 @kopf.on.startup()
 def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
-    # Force standalone mode to avoid needing the KopfPeering CRD
     settings.peering.standalone = True
     settings.peering.name = "standalone"
     
     logger.info("KumaOps Operator Startup")
-    logger.info(f"Kuma URL: {KUMA_URL} | Log Level: {LOG_LEVEL}")
-    
     if not all([KUMA_URL, KUMA_USER, KUMA_PASS]):
-        logger.error("Missing KUMA_URL, KUMA_USER, or KUMA_PASS")
+        logger.error("Missing KUMA_URL, KUMA_USER, or KUMA_PASS environment variables.")
         return
 
     try:
-        with KumaSession() as api:
-            logger.info("Connection to Uptime Kuma verified.")
+        kuma_manager.get_api()
+        logger.info("Uptime Kuma connection verified.")
     except Exception as e:
-        logger.error(f"Startup connection failed: {e}")
+        logger.error(f"Failed initial connection: {e}")
 
 @kopf.on.resume('apps', 'v1', 'deployments')
 @kopf.on.create('apps', 'v1', 'deployments')
@@ -140,27 +175,30 @@ def reconcile(name, namespace, annotations, logger, **kwargs):
     config = parse_annotations(annotations)
     
     try:
-        with KumaSession() as api:
-            if config:
-                logger.info(f"Reconciling {namespace}/{name} (ENABLED)")
-                sync_monitor(api, monitor_name, config, logger)
-            else:
-                # Clean up or ignore
-                existing = next((m for m in api.get_monitors() if m['name'] == monitor_name), None)
-                if existing:
-                    logger.info(f"Removing monitor for disabled deployment: {monitor_name}")
-                    api.delete_monitor(existing['id'])
+        api = kuma_manager.get_api()
+        if config:
+            logger.info(f"Reconciling deployment: {namespace}/{name}")
+            sync_monitor(api, monitor_name, config, logger)
+        else:
+            # Check if it was previously enabled and needs deletion
+            monitors = api.get_monitors()
+            existing = next((m for m in monitors if m['name'] == monitor_name), None)
+            if existing:
+                logger.info(f"Removing monitor for disabled deployment: {monitor_name}")
+                api.delete_monitor(existing['id'])
     except Exception as e:
         logger.error(f"Reconciliation failure for {monitor_name}: {e}")
 
 @kopf.on.delete('apps', 'v1', 'deployments')
 def on_delete(name, namespace, logger, **kwargs):
     monitor_name = get_monitor_name(name, namespace)
+    logger.info(f"Deployment {namespace}/{name} deleted.")
     try:
-        with KumaSession() as api:
-            existing = next((m for m in api.get_monitors() if m['name'] == monitor_name), None)
-            if existing:
-                logger.info(f"Deleting monitor on deployment removal: {monitor_name}")
-                api.delete_monitor(existing['id'])
+        api = kuma_manager.get_api()
+        monitors = api.get_monitors()
+        existing = next((m for m in monitors if m['name'] == monitor_name), None)
+        if existing:
+            logger.info(f"Deleting monitor: {monitor_name}")
+            api.delete_monitor(existing['id'])
     except Exception as e:
-        logger.error(f"Deletion failure for {monitor_name}: {e}")
+        logger.error(f"Cleanup error for {monitor_name}: {e}")

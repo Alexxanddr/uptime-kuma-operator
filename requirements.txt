@@ -1,3 +1,5 @@
 kopf==1.36.2
 uptime-kuma-api-v2>=1.0.1
 kubernetes
+python-socketio[client]>=5.11.0
+python-engineio>=4.9.0
