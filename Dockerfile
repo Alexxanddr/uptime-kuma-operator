@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY operator.py .
 
 # Run with --standalone to avoid needing a peering CRD
-CMD ["kopf", "run", "--standalone", "--peering=standalone", "operator.py"]
+CMD ["kopf", "run", "--all-namespaces", "--standalone", "--peering=standalone", "operator.py"]
