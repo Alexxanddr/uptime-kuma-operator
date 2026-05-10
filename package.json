@@ -1,0 +1,13 @@
+{
+  "name": "kumaops-operator",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Kubernetes Operator for Uptime Kuma",
+  "scripts": {
+    "dev": "node -e \"const http=require('http');http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html'});res.end('<html><body style=\\'font-family:system-ui,sans-serif;padding:3rem;line-height:1.6;\\'><h1>KumaOps Operator</h1><p>Headless Mode Active.</p><p>Deploy to your cluster using the manifests in <code>/kubernetes</code>.</p></body></html>')}).listen(3000)\"",
+    "start": "node -e \"const http=require('http');http.createServer((req,res)=>{res.end('KumaOps Operator Status: Online')}).listen(3000)\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: uptime-kuma-operator
+  namespace: uptime-kuma-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: uptime-kuma-operator
+  template:
+    metadata:
+      labels:
+        app: uptime-kuma-operator
+    spec:
+      serviceAccountName: uptime-kuma-operator
+      containers:
+      - name: operator
+        image: ghcr.io/alexxanddr/uptime-kuma-operator:latest
+        env:
+        - name: KUMA_URL
+          valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: url } }
+        - name: KUMA_USER
+          valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: user } }
+        - name: KUMA_PASS
+          valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: pass } }

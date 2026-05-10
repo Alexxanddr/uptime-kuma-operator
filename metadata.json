@@ -1,0 +1,6 @@
+{
+  "name": "KumaOps: K8s Monitor Operator",
+  "description": "A Kubernetes operator for Uptime Kuma. Watches Deployments and syncs monitors automatically via annotations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["Kubernetes Integration", "Monitoring", "Automation"]
+}
