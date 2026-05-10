@@ -83,26 +83,39 @@ def sync_monitor(api, monitor_name, config, logger):
         logger.info(f"Creating new monitor: {monitor_name}")
         api.add_monitor(**args)
 
-@kopf.on.create('deployments')
-@kopf.on.update('deployments')
-def reconcile(name, namespace, annotations, logger, **kwargs):
+@kopf.on.startup()
+def configure(settings: kopf.OperatorSettings, **_):
+    """Log startup message and configure logging."""
+    logging.info("KumaOps Operator is starting...")
+    logging.info(f"Connecting to Uptime Kuma at {KUMA_URL}")
+
+@kopf.on.create('apps', 'v1', 'deployments')
+@kopf.on.update('apps', 'v1', 'deployments')
+@kopf.on.resume('apps', 'v1', 'deployments')
+def reconcile(name, namespace, body, logger, **kwargs):
     """Reconcile Deployment annotations with Uptime Kuma monitors."""
+    annotations = body.get('metadata', {}).get('annotations', {})
+    logger.info(f"Reconciling Deployment {namespace}/{name}")
+    
     config = parse_annotations(annotations)
     monitor_name = get_monitor_name(name, namespace)
+    
     try:
         with get_api() as api:
             if config:
+                logger.info(f"Found active monitor configuration for {monitor_name}")
                 sync_monitor(api, monitor_name, config, logger)
             else:
-                # Monitoring disabled or annotations removed
+                logger.debug(f"No active monitor configuration for {monitor_name}, ensuring it doesn't exist.")
                 delete_monitor_logic(api, monitor_name, logger)
     except Exception as e:
         logger.error(f"Reconciliation failed for {monitor_name}: {str(e)}")
 
-@kopf.on.delete('deployments')
+@kopf.on.delete('apps', 'v1', 'deployments')
 def on_delete(name, namespace, logger, **kwargs):
     """Delete the monitor when the Deployment is deleted."""
     monitor_name = get_monitor_name(name, namespace)
+    logger.info(f"Deployment {namespace}/{name} deleted. Removing monitor {monitor_name}")
     try:
         with get_api() as api:
             delete_monitor_logic(api, monitor_name, logger)
