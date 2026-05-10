@@ -24,3 +24,5 @@ spec:
           valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: user } }
         - name: KUMA_PASS
           valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: pass } }
+        - name: LOG_LEVEL
+          value: "DEBUG"
