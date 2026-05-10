@@ -17,6 +17,8 @@ spec:
       containers:
       - name: operator
         image: ghcr.io/alexxanddr/uptime-kuma-operator:latest
+        command: ["kopf"]
+        args: ["run", "--all-namespaces", "--standalone", "operator.py"]
         env:
         - name: KUMA_URL
           valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: url } }

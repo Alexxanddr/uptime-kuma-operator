@@ -113,7 +113,11 @@ def sync_monitor(api, monitor_name, config, logger):
         api.add_monitor(**args)
 
 @kopf.on.startup()
-def on_startup(logger, **kwargs):
+def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
+    # Force standalone mode to avoid needing the KopfPeering CRD
+    settings.peering.standalone = True
+    settings.peering.name = "standalone"
+    
     logger.info("KumaOps Operator Startup")
     logger.info(f"Kuma URL: {KUMA_URL} | Log Level: {LOG_LEVEL}")
     
