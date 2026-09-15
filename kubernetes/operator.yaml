@@ -14,6 +14,7 @@ spec:
         app: uptime-kuma-operator
     spec:
       serviceAccountName: uptime-kuma-operator
+      automountServiceAccountToken: true
       containers:
       - name: operator
         image: ghcr.io/alexxanddr/uptime-kuma-operator:latest

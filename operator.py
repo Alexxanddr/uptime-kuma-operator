@@ -105,7 +105,7 @@ def sync_monitor(api, monitor_name, config, logger):
 
     type_map = {
         "http": MonitorType.HTTP,
-        "port": MonitorType.PORT,
+        "tcp": MonitorType.PORT,
         "ping": MonitorType.PING,
         "dns": MonitorType.DNS
     }
@@ -156,8 +156,8 @@ def sync_monitor(api, monitor_name, config, logger):
              logger.error(f"Hostname missing for {monitor_name}")
              return
         args["hostname"] = config["hostname"]
-        if config["type"] == "port":
-            args["port"] = config["port"]
+        if config["type"] == "tcp":
+            args["port"] = config["port"] or 80
 
     if existing:
         logger.info(f"UPDATING monitor: {monitor_name}")
@@ -165,6 +165,10 @@ def sync_monitor(api, monitor_name, config, logger):
     else:
         logger.info(f"CREATING monitor: {monitor_name}")
         api.add_monitor(**args)
+
+@kopf.on.login()
+def login_fn(**kwargs):
+    return kopf.login_via_client(**kwargs)
 
 @kopf.on.startup()
 def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):

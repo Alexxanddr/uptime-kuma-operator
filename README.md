@@ -6,7 +6,7 @@ A lightweight Kubernetes Operator built with **Python** and **Kopf** that automa
 
 - **Automated Lifecycle**: Creates, updates, and deletes monitors automatically when Deployments change.
 - **Cluster-Wide**: Watches all namespaces by default.
-- **Support for Multiple Types**: Supports `HTTP`, `TCP (Port)`, `Ping`, and `DNS`.
+- **Support for Multiple Types**: Supports `HTTP`, `TCP`, `Ping`, and `DNS`.
 - **Group Support**: Assign monitors to parent groups in Uptime Kuma.
 - **Notification Integration**: Link monitors to existing Uptime Kuma notification groups by name.
 - **Secure**: Credentials handled via Kubernetes Secrets.
@@ -45,10 +45,10 @@ metadata:
 | Annotation | Description | Default |
 | :--- | :--- | :--- |
 | `uptime-kuma.io/enabled` | `"true"` to enable monitoring. | `false` |
-| `uptime-kuma.io/type` | Type: `http`, `port`, `ping`, `dns`. | `http` |
+| `uptime-kuma.io/type` | Type: `http`, `tcp`, `ping`, `dns`. | `http` |
 | `uptime-kuma.io/url` | Full URL (for `http`). | - |
-| `uptime-kuma.io/hostname` | Hostname/IP (for `port`, `ping`, `dns`). | - |
-| `uptime-kuma.io/port` | Port number (for `port`). | `80` |
+| `uptime-kuma.io/hostname` | Hostname/IP (for `tcp`, `ping`, `dns`). | - |
+| `uptime-kuma.io/port` | Port number (for `tcp`). | `80` |
 | `uptime-kuma.io/interval` | Heartbeat interval (sec). | `60` |
 | `uptime-kuma.io/retries` | Maximum retries. | `3` |
 | `uptime-kuma.io/notifications` | Notification names (comma-separated). | - |
