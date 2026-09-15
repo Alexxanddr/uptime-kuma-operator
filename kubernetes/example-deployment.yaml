@@ -8,6 +8,7 @@ metadata:
     uptime-kuma.io/name: "Sample App Production"
     uptime-kuma.io/type: "http"
     uptime-kuma.io/url: "https://my-service.default.svc.cluster.local"
+    uptime-kuma.io/status-codes: "200-299, 301, 302"
     uptime-kuma.io/interval: "60"
     uptime-kuma.io/retries: "3"
     uptime-kuma.io/notifications: "Slack Alerts, Email Admins"

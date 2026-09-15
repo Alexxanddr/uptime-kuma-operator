@@ -37,6 +37,7 @@ metadata:
     uptime-kuma.io/name: "My Custom Service Name"
     uptime-kuma.io/type: "http"
     uptime-kuma.io/url: "https://example.com"
+    uptime-kuma.io/status-codes: "200-299, 301, 302"
     uptime-kuma.io/interval: "60"
     uptime-kuma.io/retries: "3"
     uptime-kuma.io/notifications: "Slack, Email Admin"
@@ -49,6 +50,7 @@ metadata:
 | `uptime-kuma.io/name` | Custom display name for the monitor. | `k8s-{namespace}-{name}` |
 | `uptime-kuma.io/type` | Type: `http`, `tcp`, `ping`, `dns`. | `http` |
 | `uptime-kuma.io/url` | Full URL (for `http`). | - |
+| `uptime-kuma.io/status-codes` | Accepted HTTP status codes (e.g. `200-299, 301`). | `200-299` |
 | `uptime-kuma.io/hostname` | Hostname/IP (for `tcp`, `ping`, `dns`). | - |
 | `uptime-kuma.io/port` | Port number (for `tcp`). | `80` |
 | `uptime-kuma.io/interval` | Heartbeat interval (sec). | `60` |

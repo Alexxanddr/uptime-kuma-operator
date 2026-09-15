@@ -79,6 +79,47 @@ def get_monitor_name(name, namespace, annotations=None):
             return custom_name.strip()
     return f"k8s-{namespace}-{name}"
 
+def parse_accepted_status_codes(val):
+    if not val:
+        return None
+    import json
+    val = str(val).strip()
+    raw_tokens = []
+    if val.startswith('[') and val.endswith(']'):
+        try:
+            parsed = json.loads(val)
+            raw_tokens = [str(x).strip() for x in parsed]
+        except Exception:
+            raw_tokens = [x.strip() for x in val.strip('[]').split(',')]
+    else:
+        raw_tokens = [x.strip() for x in val.split(',')]
+    
+    allowed = {'100-199', '200-299', '300-399', '400-499', '500-599'} | {str(i) for i in range(100, 1000)}
+    result = []
+    for token in raw_tokens:
+        token = token.strip('\"\' ')
+        if not token:
+            continue
+        if token in allowed:
+            if token not in result:
+                result.append(token)
+        elif '-' in token:
+            parts = token.split('-')
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                start, end = int(parts[0]), int(parts[1])
+                if 100 <= start <= 999 and 100 <= end <= 999 and start <= end:
+                    if end - start <= 20:
+                        for c in range(start, end + 1):
+                            s = str(c)
+                            if s not in result:
+                                result.append(s)
+                    else:
+                        for century in range((start // 100) * 100, (end // 100 + 1) * 100, 100):
+                            r = f"{century}-{century+99}"
+                            if r in allowed and r not in result:
+                                result.append(r)
+    return result if result else None
+
 def parse_annotations(annotations, name=None, namespace=None):
     if not annotations:
         return None
@@ -89,6 +130,14 @@ def parse_annotations(annotations, name=None, namespace=None):
     
     default_name = f"k8s-{namespace}-{name}" if name and namespace else None
     custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() or None
+
+    status_codes_raw = (
+        annotations.get(f"{ANNOTATION_PREFIX}/status-codes")
+        or annotations.get(f"{ANNOTATION_PREFIX}/accepted-statuscodes")
+        or annotations.get(f"{ANNOTATION_PREFIX}/accepted-status-codes")
+        or annotations.get(f"{ANNOTATION_PREFIX}/statuscodes")
+    )
+    accepted_statuscodes = parse_accepted_status_codes(status_codes_raw)
 
     try:
         config = {
@@ -103,7 +152,8 @@ def parse_annotations(annotations, name=None, namespace=None):
             "interval": int(annotations.get(f"{ANNOTATION_PREFIX}/interval", 60)),
             "maxretries": int(annotations.get(f"{ANNOTATION_PREFIX}/retries", 3)),
             "notifications": [n.strip() for n in annotations.get(f"{ANNOTATION_PREFIX}/notifications", "").split(",") if n.strip()],
-            "group": annotations.get(f"{ANNOTATION_PREFIX}/group")
+            "group": annotations.get(f"{ANNOTATION_PREFIX}/group"),
+            "accepted_statuscodes": accepted_statuscodes
         }
         return config
     except Exception as e:
@@ -183,6 +233,7 @@ def sync_monitor(api, monitor_name, config, logger):
              logger.error(f"URL missing for {monitor_name}")
              return
         args["url"] = config["url"]
+        args["accepted_statuscodes"] = config.get("accepted_statuscodes") or ["200-299"]
     else:
         if not config["hostname"]:
              logger.error(f"Hostname missing for {monitor_name}")
