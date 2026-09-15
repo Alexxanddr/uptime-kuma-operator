@@ -5,6 +5,7 @@ metadata:
   namespace: default
   annotations:
     uptime-kuma.io/enabled: "true"
+    uptime-kuma.io/name: "Sample App Production"
     uptime-kuma.io/type: "http"
     uptime-kuma.io/url: "https://my-service.default.svc.cluster.local"
     uptime-kuma.io/interval: "60"

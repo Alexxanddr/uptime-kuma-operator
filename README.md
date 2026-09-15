@@ -34,6 +34,7 @@ Add the following annotations to your Deployment:
 metadata:
   annotations:
     uptime-kuma.io/enabled: "true"
+    uptime-kuma.io/name: "My Custom Service Name"
     uptime-kuma.io/type: "http"
     uptime-kuma.io/url: "https://example.com"
     uptime-kuma.io/interval: "60"
@@ -45,6 +46,7 @@ metadata:
 | Annotation | Description | Default |
 | :--- | :--- | :--- |
 | `uptime-kuma.io/enabled` | `"true"` to enable monitoring. | `false` |
+| `uptime-kuma.io/name` | Custom display name for the monitor. | `k8s-{namespace}-{name}` |
 | `uptime-kuma.io/type` | Type: `http`, `tcp`, `ping`, `dns`. | `http` |
 | `uptime-kuma.io/url` | Full URL (for `http`). | - |
 | `uptime-kuma.io/hostname` | Hostname/IP (for `tcp`, `ping`, `dns`). | - |
@@ -56,7 +58,7 @@ metadata:
 
 ## 🛠 Technical Details
 - **Framework**: [Kopf](https://kopf.readthedocs.io/)
-- **API Client**: [uptime-kuma-api-v2](https://github.com/exaland/uptime-kuma-api-v2)
+- **API Client**: [uptime-kuma-api2](https://github.com/pbarone/uptime-kuma-api2) (Uptime Kuma v1.x and v2.x support)
 - **Protocol**: Socket.IO
 
 ## 🤝 Contributing

@@ -72,10 +72,14 @@ class KumaManager:
 
 kuma_manager = KumaManager()
 
-def get_monitor_name(name, namespace):
+def get_monitor_name(name, namespace, annotations=None):
+    if annotations:
+        custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name")
+        if custom_name and custom_name.strip():
+            return custom_name.strip()
     return f"k8s-{namespace}-{name}"
 
-def parse_annotations(annotations):
+def parse_annotations(annotations, name=None, namespace=None):
     if not annotations:
         return None
     
@@ -83,8 +87,13 @@ def parse_annotations(annotations):
     if enabled_val != "true":
         return None
     
+    default_name = f"k8s-{namespace}-{name}" if name and namespace else None
+    custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() or None
+
     try:
         config = {
+            "name": custom_name or default_name,
+            "default_name": default_name,
             "type": annotations.get(f"{ANNOTATION_PREFIX}/type", "http").lower(),
             "url": annotations.get(f"{ANNOTATION_PREFIX}/url"),
             "hostname": annotations.get(f"{ANNOTATION_PREFIX}/hostname"),
@@ -101,7 +110,10 @@ def parse_annotations(annotations):
 
 def sync_monitor(api, monitor_name, config, logger):
     monitors = api.get_monitors()
+    # Check if monitor exists by custom name or fallback default name
     existing = next((m for m in monitors if m['name'] == monitor_name), None)
+    if not existing and config.get("default_name") and config["default_name"] != monitor_name:
+        existing = next((m for m in monitors if m['name'] == config["default_name"]), None)
 
     type_map = {
         "http": MonitorType.HTTP,
@@ -198,36 +210,42 @@ def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
 @kopf.on.update('apps', 'v1', 'deployments')
 def reconcile(name, namespace, annotations, logger, **kwargs):
     logger.debug(f"Event for {namespace}/{name}")
-    monitor_name = get_monitor_name(name, namespace)
-    config = parse_annotations(annotations)
+    config = parse_annotations(annotations, name=name, namespace=namespace)
+    default_name = f"k8s-{namespace}-{name}"
+    monitor_name = config["name"] if config else get_monitor_name(name, namespace, annotations)
     
     try:
         api = kuma_manager.get_api()
         if config:
-            logger.info(f"Reconciling deployment: {namespace}/{name}")
+            logger.info(f"Reconciling deployment: {namespace}/{name} -> monitor: '{monitor_name}'")
             sync_monitor(api, monitor_name, config, logger)
         else:
-            # Check if it was previously enabled and needs deletion
+            # Check if it was previously enabled and needs deletion (check custom name and default name)
             monitors = api.get_monitors()
-            existing = next((m for m in monitors if m['name'] == monitor_name), None)
-            if existing:
-                logger.info(f"Removing monitor for disabled deployment: {monitor_name}")
-                api.delete_monitor(existing['id'])
+            candidate_names = {monitor_name, default_name}
+            for candidate in candidate_names:
+                existing = next((m for m in monitors if m['name'] == candidate), None)
+                if existing:
+                    logger.info(f"Removing monitor for disabled deployment: {candidate}")
+                    api.delete_monitor(existing['id'])
     except Exception as e:
         logger.error(f"Reconciliation failure for {monitor_name}: {e}")
         raise kopf.TemporaryError(f"Reconciliation failure for {monitor_name}: {e}", delay=15)
 
 @kopf.on.delete('apps', 'v1', 'deployments')
-def on_delete(name, namespace, logger, **kwargs):
-    monitor_name = get_monitor_name(name, namespace)
+def on_delete(name, namespace, annotations, logger, **kwargs):
+    default_name = f"k8s-{namespace}-{name}"
+    monitor_name = get_monitor_name(name, namespace, annotations)
+    candidate_names = {monitor_name, default_name}
     logger.info(f"Deployment {namespace}/{name} deleted.")
     try:
         api = kuma_manager.get_api()
         monitors = api.get_monitors()
-        existing = next((m for m in monitors if m['name'] == monitor_name), None)
-        if existing:
-            logger.info(f"Deleting monitor: {monitor_name}")
-            api.delete_monitor(existing['id'])
+        for candidate in candidate_names:
+            existing = next((m for m in monitors if m['name'] == candidate), None)
+            if existing:
+                logger.info(f"Deleting monitor: {candidate}")
+                api.delete_monitor(existing['id'])
     except Exception as e:
         logger.error(f"Cleanup error for {monitor_name}: {e}")
         raise kopf.TemporaryError(f"Cleanup error for {monitor_name}: {e}", delay=15)
