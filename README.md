@@ -28,7 +28,7 @@ kubectl apply -f kubernetes/operator.yaml
 
 ## 📖 Usage
 
-Add the following annotations to your Deployment:
+Add the annotations either to the Deployment metadata (`metadata.annotations`) or to the Pod template (`spec.template.metadata.annotations`):
 
 ```yaml
 metadata:

@@ -79,6 +79,19 @@ def get_monitor_name(name, namespace, annotations=None):
             return custom_name.strip()
     return f"k8s-{namespace}-{name}"
 
+def extract_effective_annotations(body=None, annotations=None):
+    merged = {}
+    if isinstance(body, dict):
+        template_annotations = body.get('spec', {}).get('template', {}).get('metadata', {}).get('annotations')
+        if isinstance(template_annotations, dict):
+            merged.update(template_annotations)
+        meta_annotations = body.get('metadata', {}).get('annotations')
+        if isinstance(meta_annotations, dict):
+            merged.update(meta_annotations)
+    if isinstance(annotations, dict):
+        merged.update(annotations)
+    return merged
+
 def parse_accepted_status_codes(val):
     if not val:
         return None
@@ -279,20 +292,17 @@ def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
 @kopf.on.resume('apps', 'v1', 'deployments')
 @kopf.on.create('apps', 'v1', 'deployments')
 @kopf.on.update('apps', 'v1', 'deployments')
-def reconcile(name, namespace, annotations, logger, old=None, **kwargs):
+def reconcile(name, namespace, annotations, logger, old=None, body=None, **kwargs):
     logger.debug(f"Event for {namespace}/{name}")
-    config = parse_annotations(annotations, name=name, namespace=namespace)
+    effective_annotations = extract_effective_annotations(body=body, annotations=annotations)
+    config = parse_annotations(effective_annotations, name=name, namespace=namespace)
     default_name = f"k8s-{namespace}-{name}"
     k8s_tag = f"k8s:{namespace}/{name}"
     svc_pattern = f"{name}.{namespace}.svc"
 
     # Extract any previous custom name from 'old' state
-    old_annotations = {}
-    if isinstance(old, dict):
-        old_annotations = old.get('metadata', {}).get('annotations') or {}
-    elif 'old' in kwargs and isinstance(kwargs['old'], dict):
-        old_annotations = kwargs['old'].get('metadata', {}).get('annotations') or {}
-
+    old_obj = old if isinstance(old, dict) else kwargs.get('old')
+    old_annotations = extract_effective_annotations(body=old_obj)
     old_custom_name = old_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if old_annotations else None
 
     # Also inspect 'diff' for any removed or changed name annotations
@@ -306,9 +316,7 @@ def reconcile(name, namespace, annotations, logger, old=None, **kwargs):
                 if (
                     isinstance(field_path, (list, tuple))
                     and len(field_path) >= 3
-                    and field_path[0] == 'metadata'
-                    and field_path[1] == 'annotations'
-                    and field_path[2] == f"{ANNOTATION_PREFIX}/name"
+                    and field_path[-1] == f"{ANNOTATION_PREFIX}/name"
                     and old_val
                 ):
                     diff_old_names.add(str(old_val).strip())
@@ -324,7 +332,7 @@ def reconcile(name, namespace, annotations, logger, old=None, **kwargs):
         else:
             # Deployment has annotations removed or disabled -> delete associated monitor(s)
             candidates = {default_name}
-            current_custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if annotations else None
+            current_custom_name = effective_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if effective_annotations else None
             if current_custom_name:
                 candidates.add(current_custom_name)
             if old_custom_name:
@@ -346,9 +354,10 @@ def reconcile(name, namespace, annotations, logger, old=None, **kwargs):
         raise kopf.TemporaryError(f"Reconciliation failure for {namespace}/{name}: {e}", delay=15)
 
 @kopf.on.delete('apps', 'v1', 'deployments')
-def on_delete(name, namespace, annotations, logger, **kwargs):
+def on_delete(name, namespace, annotations, logger, body=None, **kwargs):
+    effective_annotations = extract_effective_annotations(body=body, annotations=annotations)
     default_name = f"k8s-{namespace}-{name}"
-    custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if annotations else None
+    custom_name = effective_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if effective_annotations else None
     k8s_tag = f"k8s:{namespace}/{name}"
     svc_pattern = f"{name}.{namespace}.svc"
     candidates = {default_name}
