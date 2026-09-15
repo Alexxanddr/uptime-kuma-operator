@@ -168,7 +168,11 @@ def sync_monitor(api, monitor_name, config, logger):
 
 @kopf.on.login()
 def login_fn(**kwargs):
-    return kopf.login_via_client(**kwargs)
+    return (
+        kopf.login_with_service_account(**kwargs)
+        or kopf.login_via_client(**kwargs)
+        or kopf.login_with_kubeconfig(**kwargs)
+    )
 
 @kopf.on.startup()
 def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
