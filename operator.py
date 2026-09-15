@@ -164,7 +164,10 @@ def sync_monitor(api, monitor_name, config, logger):
         api.edit_monitor(existing['id'], **args)
     else:
         logger.info(f"CREATING monitor: {monitor_name}")
-        api.add_monitor(**args)
+        try:
+            api.add_monitor(**args, conditions=[])
+        except TypeError:
+            api.add_monitor(**args)
 
 @kopf.on.login()
 def login_fn(**kwargs):
@@ -212,6 +215,7 @@ def reconcile(name, namespace, annotations, logger, **kwargs):
                 api.delete_monitor(existing['id'])
     except Exception as e:
         logger.error(f"Reconciliation failure for {monitor_name}: {e}")
+        raise kopf.TemporaryError(f"Reconciliation failure for {monitor_name}: {e}", delay=15)
 
 @kopf.on.delete('apps', 'v1', 'deployments')
 def on_delete(name, namespace, logger, **kwargs):
@@ -226,3 +230,4 @@ def on_delete(name, namespace, logger, **kwargs):
             api.delete_monitor(existing['id'])
     except Exception as e:
         logger.error(f"Cleanup error for {monitor_name}: {e}")
+        raise kopf.TemporaryError(f"Cleanup error for {monitor_name}: {e}", delay=15)
