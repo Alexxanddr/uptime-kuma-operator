@@ -91,7 +91,8 @@ def parse_annotations(annotations):
             "port": int(annotations.get(f"{ANNOTATION_PREFIX}/port", 80)) if annotations.get(f"{ANNOTATION_PREFIX}/port") else None,
             "interval": int(annotations.get(f"{ANNOTATION_PREFIX}/interval", 60)),
             "maxretries": int(annotations.get(f"{ANNOTATION_PREFIX}/retries", 3)),
-            "notifications": [n.strip() for n in annotations.get(f"{ANNOTATION_PREFIX}/notifications", "").split(",") if n.strip()]
+            "notifications": [n.strip() for n in annotations.get(f"{ANNOTATION_PREFIX}/notifications", "").split(",") if n.strip()],
+            "group": annotations.get(f"{ANNOTATION_PREFIX}/group")
         }
         return config
     except Exception as e:
@@ -122,12 +123,27 @@ def sync_monitor(api, monitor_name, config, logger):
         except Exception as e:
             logger.error(f"Notification fetch error: {e}")
 
+    # Resolve parent group ID if specified
+    parent_id = None
+    if config.get("group"):
+        group_name = config["group"].strip()
+        try:
+            groups = [m for m in monitors if m.get('type') == 'group']
+            group_obj = next((g for g in groups if g.get('name') == group_name or str(g.get('id')) == group_name), None)
+            if group_obj:
+                parent_id = group_obj['id']
+            else:
+                logger.warning(f"Group '{group_name}' not found in Uptime Kuma.")
+        except Exception as e:
+            logger.error(f"Error resolving group '{group_name}': {e}")
+
     args = {
         "type": type_map.get(config["type"], MonitorType.HTTP),
         "name": monitor_name,
         "interval": config["interval"],
         "maxretries": config["maxretries"],
-        "notificationIDList": notification_ids
+        "notificationIDList": notification_ids,
+        "parent": parent_id
     }
 
     if config["type"] == "http":

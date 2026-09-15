@@ -10,6 +10,7 @@ metadata:
     uptime-kuma.io/interval: "60"
     uptime-kuma.io/retries: "3"
     uptime-kuma.io/notifications: "Slack Alerts, Email Admins"
+    uptime-kuma.io/group: "Web Services"
 spec:
   replicas: 1
   selector:

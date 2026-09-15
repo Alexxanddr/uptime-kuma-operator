@@ -7,6 +7,7 @@ A lightweight Kubernetes Operator built with **Python** and **Kopf** that automa
 - **Automated Lifecycle**: Creates, updates, and deletes monitors automatically when Deployments change.
 - **Cluster-Wide**: Watches all namespaces by default.
 - **Support for Multiple Types**: Supports `HTTP`, `TCP (Port)`, `Ping`, and `DNS`.
+- **Group Support**: Assign monitors to parent groups in Uptime Kuma.
 - **Notification Integration**: Link monitors to existing Uptime Kuma notification groups by name.
 - **Secure**: Credentials handled via Kubernetes Secrets.
 - **Idempotent**: Uses a predictable naming convention (`k8s-{namespace}-{name}`) to prevent duplicates.
@@ -38,6 +39,7 @@ metadata:
     uptime-kuma.io/interval: "60"
     uptime-kuma.io/retries: "3"
     uptime-kuma.io/notifications: "Slack, Email Admin"
+    uptime-kuma.io/group: "Web Services"
 ```
 
 | Annotation | Description | Default |
@@ -50,6 +52,7 @@ metadata:
 | `uptime-kuma.io/interval` | Heartbeat interval (sec). | `60` |
 | `uptime-kuma.io/retries` | Maximum retries. | `3` |
 | `uptime-kuma.io/notifications` | Notification names (comma-separated). | - |
+| `uptime-kuma.io/group` | Parent group name or ID in Uptime Kuma. | - |
 
 ## 🛠 Technical Details
 - **Framework**: [Kopf](https://kopf.readthedocs.io/)
