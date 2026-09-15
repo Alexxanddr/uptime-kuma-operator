@@ -94,6 +94,8 @@ def parse_annotations(annotations, name=None, namespace=None):
         config = {
             "name": custom_name or default_name,
             "default_name": default_name,
+            "namespace": namespace,
+            "resource_name": name,
             "type": annotations.get(f"{ANNOTATION_PREFIX}/type", "http").lower(),
             "url": annotations.get(f"{ANNOTATION_PREFIX}/url"),
             "hostname": annotations.get(f"{ANNOTATION_PREFIX}/hostname"),
@@ -110,8 +112,25 @@ def parse_annotations(annotations, name=None, namespace=None):
 
 def sync_monitor(api, monitor_name, config, logger):
     monitors = api.get_monitors()
-    # Check if monitor exists by custom name or fallback default name
-    existing = next((m for m in monitors if m['name'] == monitor_name), None)
+    ns = config.get("namespace") or ""
+    res_name = config.get("resource_name") or ""
+    k8s_tag = f"k8s:{ns}/{res_name}" if ns and res_name else None
+
+    # Check if monitor exists:
+    # 1. By k8s_tag in description
+    existing = None
+    if k8s_tag:
+        existing = next((m for m in monitors if m.get('description') and m['description'].startswith(k8s_tag)), None)
+
+    # 2. Check if monitor exists by custom/target name
+    if not existing:
+        existing = next((m for m in monitors if m['name'] == monitor_name), None)
+
+    # 3. Check if monitor exists by old name (if renamed)
+    if not existing and config.get("old_name") and config["old_name"] != monitor_name:
+        existing = next((m for m in monitors if m['name'] == config["old_name"]), None)
+
+    # 4. Check fallback default name
     if not existing and config.get("default_name") and config["default_name"] != monitor_name:
         existing = next((m for m in monitors if m['name'] == config["default_name"]), None)
 
@@ -152,6 +171,7 @@ def sync_monitor(api, monitor_name, config, logger):
     args = {
         "type": type_map.get(config["type"], MonitorType.HTTP),
         "name": monitor_name,
+        "description": k8s_tag,
         "interval": config["interval"],
         "maxretries": config["maxretries"],
         "notificationIDList": notification_ids,
@@ -208,44 +228,95 @@ def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
 @kopf.on.resume('apps', 'v1', 'deployments')
 @kopf.on.create('apps', 'v1', 'deployments')
 @kopf.on.update('apps', 'v1', 'deployments')
-def reconcile(name, namespace, annotations, logger, **kwargs):
+def reconcile(name, namespace, annotations, logger, old=None, **kwargs):
     logger.debug(f"Event for {namespace}/{name}")
     config = parse_annotations(annotations, name=name, namespace=namespace)
     default_name = f"k8s-{namespace}-{name}"
-    monitor_name = config["name"] if config else get_monitor_name(name, namespace, annotations)
-    
+    k8s_tag = f"k8s:{namespace}/{name}"
+    svc_pattern = f"{name}.{namespace}.svc"
+
+    # Extract any previous custom name from 'old' state
+    old_annotations = {}
+    if isinstance(old, dict):
+        old_annotations = old.get('metadata', {}).get('annotations') or {}
+    elif 'old' in kwargs and isinstance(kwargs['old'], dict):
+        old_annotations = kwargs['old'].get('metadata', {}).get('annotations') or {}
+
+    old_custom_name = old_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if old_annotations else None
+
+    # Also inspect 'diff' for any removed or changed name annotations
+    diff_old_names = set()
+    diff = kwargs.get('diff')
+    if diff:
+        for item in diff:
+            if len(item) >= 3:
+                field_path = item[1]
+                old_val = item[2]
+                if (
+                    isinstance(field_path, (list, tuple))
+                    and len(field_path) >= 3
+                    and field_path[0] == 'metadata'
+                    and field_path[1] == 'annotations'
+                    and field_path[2] == f"{ANNOTATION_PREFIX}/name"
+                    and old_val
+                ):
+                    diff_old_names.add(str(old_val).strip())
+
     try:
         api = kuma_manager.get_api()
         if config:
+            if old_custom_name and old_custom_name != config["name"]:
+                config["old_name"] = old_custom_name
+            monitor_name = config["name"]
             logger.info(f"Reconciling deployment: {namespace}/{name} -> monitor: '{monitor_name}'")
             sync_monitor(api, monitor_name, config, logger)
         else:
-            # Check if it was previously enabled and needs deletion (check custom name and default name)
+            # Deployment has annotations removed or disabled -> delete associated monitor(s)
+            candidates = {default_name}
+            current_custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if annotations else None
+            if current_custom_name:
+                candidates.add(current_custom_name)
+            if old_custom_name:
+                candidates.add(old_custom_name)
+            candidates.update(diff_old_names)
+
             monitors = api.get_monitors()
-            candidate_names = {monitor_name, default_name}
-            for candidate in candidate_names:
-                existing = next((m for m in monitors if m['name'] == candidate), None)
-                if existing:
-                    logger.info(f"Removing monitor for disabled deployment: {candidate}")
-                    api.delete_monitor(existing['id'])
+            to_delete = [
+                m for m in monitors
+                if (m.get('description') and m['description'].startswith(k8s_tag))
+                or m.get('name') in candidates
+                or (m.get('url') and svc_pattern in m['url'])
+            ]
+            for m in to_delete:
+                logger.info(f"Removing monitor for disabled deployment {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
+                api.delete_monitor(m['id'])
     except Exception as e:
-        logger.error(f"Reconciliation failure for {monitor_name}: {e}")
-        raise kopf.TemporaryError(f"Reconciliation failure for {monitor_name}: {e}", delay=15)
+        logger.error(f"Reconciliation failure for {namespace}/{name}: {e}")
+        raise kopf.TemporaryError(f"Reconciliation failure for {namespace}/{name}: {e}", delay=15)
 
 @kopf.on.delete('apps', 'v1', 'deployments')
 def on_delete(name, namespace, annotations, logger, **kwargs):
     default_name = f"k8s-{namespace}-{name}"
-    monitor_name = get_monitor_name(name, namespace, annotations)
-    candidate_names = {monitor_name, default_name}
+    custom_name = annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if annotations else None
+    k8s_tag = f"k8s:{namespace}/{name}"
+    svc_pattern = f"{name}.{namespace}.svc"
+    candidates = {default_name}
+    if custom_name:
+        candidates.add(custom_name)
+
     logger.info(f"Deployment {namespace}/{name} deleted.")
     try:
         api = kuma_manager.get_api()
         monitors = api.get_monitors()
-        for candidate in candidate_names:
-            existing = next((m for m in monitors if m['name'] == candidate), None)
-            if existing:
-                logger.info(f"Deleting monitor: {candidate}")
-                api.delete_monitor(existing['id'])
+        to_delete = [
+            m for m in monitors
+            if (m.get('description') and m['description'].startswith(k8s_tag))
+            or m.get('name') in candidates
+            or (m.get('url') and svc_pattern in m['url'])
+        ]
+        for m in to_delete:
+            logger.info(f"Deleting monitor for deleted deployment {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
+            api.delete_monitor(m['id'])
     except Exception as e:
-        logger.error(f"Cleanup error for {monitor_name}: {e}")
-        raise kopf.TemporaryError(f"Cleanup error for {monitor_name}: {e}", delay=15)
+        logger.error(f"Cleanup error for {namespace}/{name}: {e}")
+        raise kopf.TemporaryError(f"Cleanup error for {namespace}/{name}: {e}", delay=15)
