@@ -4,6 +4,7 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from uptime_kuma_api import UptimeKumaApi, MonitorType
 
 # Configuration
@@ -81,15 +82,44 @@ def get_monitor_name(name, namespace, annotations=None):
 
 def extract_effective_annotations(body=None, annotations=None):
     merged = {}
-    if isinstance(body, dict):
-        template_annotations = body.get('spec', {}).get('template', {}).get('metadata', {}).get('annotations')
-        if isinstance(template_annotations, dict):
-            merged.update(template_annotations)
-        meta_annotations = body.get('metadata', {}).get('annotations')
-        if isinstance(meta_annotations, dict):
-            merged.update(meta_annotations)
-    if isinstance(annotations, dict):
-        merged.update(annotations)
+    # 1. Pod template annotations in body: spec.template.metadata.annotations
+    if body and (isinstance(body, Mapping) or hasattr(body, 'get')):
+        try:
+            spec = body.get('spec') if hasattr(body, 'get') else None
+            if spec and (isinstance(spec, Mapping) or hasattr(spec, 'get')):
+                template = spec.get('template') if hasattr(spec, 'get') else None
+                if template and (isinstance(template, Mapping) or hasattr(template, 'get')):
+                    tmpl_meta = template.get('metadata') if hasattr(template, 'get') else None
+                    if tmpl_meta and (isinstance(tmpl_meta, Mapping) or hasattr(tmpl_meta, 'get')):
+                        tmpl_annotations = tmpl_meta.get('annotations') if hasattr(tmpl_meta, 'get') else None
+                        if tmpl_annotations:
+                            if hasattr(tmpl_annotations, 'items'):
+                                merged.update(dict(tmpl_annotations.items()))
+                            elif isinstance(tmpl_annotations, dict):
+                                merged.update(tmpl_annotations)
+        except Exception as e:
+            logging.debug(f"Could not read template annotations: {e}")
+
+        try:
+            meta = body.get('metadata') if hasattr(body, 'get') else None
+            if meta and (isinstance(meta, Mapping) or hasattr(meta, 'get')):
+                body_annotations = meta.get('annotations') if hasattr(meta, 'get') else None
+                if body_annotations:
+                    if hasattr(body_annotations, 'items'):
+                        merged.update(dict(body_annotations.items()))
+                    elif isinstance(body_annotations, dict):
+                        merged.update(body_annotations)
+        except Exception as e:
+            logging.debug(f"Could not read metadata annotations from body: {e}")
+
+    # 2. Direct annotations parameter (top-level deployment metadata.annotations)
+    # This guarantees 100% backward compatibility with previous behavior
+    if annotations is not None:
+        if hasattr(annotations, 'items'):
+            merged.update(dict(annotations.items()))
+        elif isinstance(annotations, dict):
+            merged.update(annotations)
+
     return merged
 
 def parse_accepted_status_codes(val):
@@ -289,11 +319,18 @@ def on_startup(logger, settings: kopf.OperatorSettings, **kwargs):
     except Exception as e:
         logger.error(f"Failed initial connection: {e}")
 
-@kopf.on.resume('apps', 'v1', 'deployments')
-@kopf.on.create('apps', 'v1', 'deployments')
-@kopf.on.update('apps', 'v1', 'deployments')
+@kopf.on.resume('apps', 'v1', 'deployments', id='resume-deployments')
+@kopf.on.resume('apps', 'v1', 'statefulsets', id='resume-statefulsets')
+@kopf.on.resume('apps', 'v1', 'daemonsets', id='resume-daemonsets')
+@kopf.on.create('apps', 'v1', 'deployments', id='create-deployments')
+@kopf.on.create('apps', 'v1', 'statefulsets', id='create-statefulsets')
+@kopf.on.create('apps', 'v1', 'daemonsets', id='create-daemonsets')
+@kopf.on.update('apps', 'v1', 'deployments', id='update-deployments')
+@kopf.on.update('apps', 'v1', 'statefulsets', id='update-statefulsets')
+@kopf.on.update('apps', 'v1', 'daemonsets', id='update-daemonsets')
 def reconcile(name, namespace, annotations, logger, old=None, body=None, **kwargs):
-    logger.debug(f"Event for {namespace}/{name}")
+    kind = (body.get('kind') if hasattr(body, 'get') else None) or kwargs.get('resource', {}).get('kind', 'Resource')
+    logger.debug(f"Event for {kind} {namespace}/{name}")
     effective_annotations = extract_effective_annotations(body=body, annotations=annotations)
     config = parse_annotations(effective_annotations, name=name, namespace=namespace)
     default_name = f"k8s-{namespace}-{name}"
@@ -301,7 +338,7 @@ def reconcile(name, namespace, annotations, logger, old=None, body=None, **kwarg
     svc_pattern = f"{name}.{namespace}.svc"
 
     # Extract any previous custom name from 'old' state
-    old_obj = old if isinstance(old, dict) else kwargs.get('old')
+    old_obj = old if old is not None else kwargs.get('old')
     old_annotations = extract_effective_annotations(body=old_obj)
     old_custom_name = old_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if old_annotations else None
 
@@ -327,10 +364,10 @@ def reconcile(name, namespace, annotations, logger, old=None, body=None, **kwarg
             if old_custom_name and old_custom_name != config["name"]:
                 config["old_name"] = old_custom_name
             monitor_name = config["name"]
-            logger.info(f"Reconciling deployment: {namespace}/{name} -> monitor: '{monitor_name}'")
+            logger.info(f"Reconciling {kind.lower()}: {namespace}/{name} -> monitor: '{monitor_name}'")
             sync_monitor(api, monitor_name, config, logger)
         else:
-            # Deployment has annotations removed or disabled -> delete associated monitor(s)
+            # Resource has annotations removed or disabled -> delete associated monitor(s)
             candidates = {default_name}
             current_custom_name = effective_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if effective_annotations else None
             if current_custom_name:
@@ -347,14 +384,17 @@ def reconcile(name, namespace, annotations, logger, old=None, body=None, **kwarg
                 or (m.get('url') and svc_pattern in m['url'])
             ]
             for m in to_delete:
-                logger.info(f"Removing monitor for disabled deployment {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
+                logger.info(f"Removing monitor for disabled {kind.lower()} {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
                 api.delete_monitor(m['id'])
     except Exception as e:
-        logger.error(f"Reconciliation failure for {namespace}/{name}: {e}")
-        raise kopf.TemporaryError(f"Reconciliation failure for {namespace}/{name}: {e}", delay=15)
+        logger.error(f"Reconciliation failure for {kind.lower()} {namespace}/{name}: {e}")
+        raise kopf.TemporaryError(f"Reconciliation failure for {kind.lower()} {namespace}/{name}: {e}", delay=15)
 
-@kopf.on.delete('apps', 'v1', 'deployments')
+@kopf.on.delete('apps', 'v1', 'deployments', id='delete-deployments')
+@kopf.on.delete('apps', 'v1', 'statefulsets', id='delete-statefulsets')
+@kopf.on.delete('apps', 'v1', 'daemonsets', id='delete-daemonsets')
 def on_delete(name, namespace, annotations, logger, body=None, **kwargs):
+    kind = (body.get('kind') if hasattr(body, 'get') else None) or kwargs.get('resource', {}).get('kind', 'Resource')
     effective_annotations = extract_effective_annotations(body=body, annotations=annotations)
     default_name = f"k8s-{namespace}-{name}"
     custom_name = effective_annotations.get(f"{ANNOTATION_PREFIX}/name", "").strip() if effective_annotations else None
@@ -364,7 +404,7 @@ def on_delete(name, namespace, annotations, logger, body=None, **kwargs):
     if custom_name:
         candidates.add(custom_name)
 
-    logger.info(f"Deployment {namespace}/{name} deleted.")
+    logger.info(f"{kind} {namespace}/{name} deleted.")
     try:
         api = kuma_manager.get_api()
         monitors = api.get_monitors()
@@ -375,8 +415,8 @@ def on_delete(name, namespace, annotations, logger, body=None, **kwargs):
             or (m.get('url') and svc_pattern in m['url'])
         ]
         for m in to_delete:
-            logger.info(f"Deleting monitor for deleted deployment {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
+            logger.info(f"Deleting monitor for deleted {kind.lower()} {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
             api.delete_monitor(m['id'])
     except Exception as e:
-        logger.error(f"Cleanup error for {namespace}/{name}: {e}")
-        raise kopf.TemporaryError(f"Cleanup error for {namespace}/{name}: {e}", delay=15)
+        logger.error(f"Cleanup error for {kind.lower()} {namespace}/{name}: {e}")
+        raise kopf.TemporaryError(f"Cleanup error for {kind.lower()} {namespace}/{name}: {e}", delay=15)

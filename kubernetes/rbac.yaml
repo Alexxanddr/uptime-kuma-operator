@@ -15,7 +15,13 @@ metadata:
   name: uptime-kuma-operator-role
 rules:
   - apiGroups: ["apps"]
-    resources: ["deployments", "deployments/status"]
+    resources:
+      - "deployments"
+      - "deployments/status"
+      - "statefulsets"
+      - "statefulsets/status"
+      - "daemonsets"
+      - "daemonsets/status"
     verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: [""]
     resources: ["events"]

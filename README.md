@@ -1,10 +1,10 @@
 # Uptime Kuma Kubernetes Operator 🚀
 
-A lightweight Kubernetes Operator built with **Python** and **Kopf** that automatically manages [Uptime Kuma](https://github.com/louislam/uptime-kuma) monitors based on Deployment annotations.
+A lightweight Kubernetes Operator built with **Python** and **Kopf** that automatically manages [Uptime Kuma](https://github.com/louislam/uptime-kuma) monitors based on annotations on **Deployments**, **StatefulSets**, and **DaemonSets**.
 
 ## 🌟 Features
 
-- **Automated Lifecycle**: Creates, updates, and deletes monitors automatically when Deployments change.
+- **Automated Lifecycle**: Creates, updates, and deletes monitors automatically when Deployments, StatefulSets, and DaemonSets change.
 - **Cluster-Wide**: Watches all namespaces by default.
 - **Support for Multiple Types**: Supports `HTTP`, `TCP`, `Ping`, and `DNS`.
 - **Group Support**: Assign monitors to parent groups in Uptime Kuma.
@@ -28,7 +28,7 @@ kubectl apply -f kubernetes/operator.yaml
 
 ## 📖 Usage
 
-Add the annotations either to the Deployment metadata (`metadata.annotations`) or to the Pod template (`spec.template.metadata.annotations`):
+Add the annotations either to the resource metadata (`metadata.annotations`) or to the Pod template (`spec.template.metadata.annotations`) on any **Deployment**, **StatefulSet**, or **DaemonSet**:
 
 ```yaml
 metadata:
