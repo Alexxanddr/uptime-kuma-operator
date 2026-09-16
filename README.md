@@ -30,6 +30,7 @@ kubectl apply -f kubernetes/operator.yaml
 
 Add the annotations either to the resource metadata (`metadata.annotations`) or to the Pod template (`spec.template.metadata.annotations`) on any **Deployment**, **StatefulSet**, or **DaemonSet**:
 
+### HTTP Example
 ```yaml
 metadata:
   annotations:
@@ -44,6 +45,20 @@ metadata:
     uptime-kuma.io/group: "Web Services"
 ```
 
+### TCP Port Example (e.g. Postgres, Redis, MySQL)
+```yaml
+metadata:
+  annotations:
+    uptime-kuma.io/enabled: "true"
+    uptime-kuma.io/name: "Database TCP Check"
+    uptime-kuma.io/type: "tcp"
+    uptime-kuma.io/port: "5432"
+    # Optional custom hostname (defaults to <name>.<namespace>.svc.cluster.local):
+    uptime-kuma.io/hostname: "postgres.default.svc.cluster.local"
+    uptime-kuma.io/interval: "60"
+    uptime-kuma.io/retries: "3"
+```
+
 | Annotation | Description | Default |
 | :--- | :--- | :--- |
 | `uptime-kuma.io/enabled` | `"true"` to enable monitoring. | `false` |
@@ -51,7 +66,7 @@ metadata:
 | `uptime-kuma.io/type` | Type: `http`, `tcp`, `ping`, `dns`. | `http` |
 | `uptime-kuma.io/url` | Full URL (for `http`). | - |
 | `uptime-kuma.io/status-codes` | Accepted HTTP status codes (e.g. `200-299, 301`). | `200-299` |
-| `uptime-kuma.io/hostname` | Hostname/IP (for `tcp`, `ping`, `dns`). | - |
+| `uptime-kuma.io/hostname` | Hostname/IP (for `tcp`, `ping`, `dns`). | `<name>.<namespace>.svc.cluster.local` |
 | `uptime-kuma.io/port` | Port number (for `tcp`). | `80` |
 | `uptime-kuma.io/interval` | Heartbeat interval (sec). | `60` |
 | `uptime-kuma.io/retries` | Maximum retries. | `3` |

@@ -4,8 +4,27 @@ import logging
 import sys
 import threading
 import time
+import urllib.parse
 from collections.abc import Mapping
 from uptime_kuma_api import UptimeKumaApi, MonitorType
+
+# Wrap UptimeKumaApi monitor conversion to prevent KeyError on non-HTTP monitors
+try:
+    import uptime_kuma_api.api as _kuma_api_mod
+
+    _orig_convert_monitor_input = _kuma_api_mod._convert_monitor_input
+    def _safe_convert_monitor_input(kwargs) -> None:
+        if kwargs is not None and isinstance(kwargs, dict):
+            kwargs.setdefault("accepted_statuscodes", ["200-299"])
+            kwargs.setdefault("notificationIDList", [])
+            kwargs.setdefault("databaseConnectionString", None)
+            kwargs.setdefault("pushToken", None)
+            kwargs.setdefault("dns_resolve_type", "A")
+        _orig_convert_monitor_input(kwargs)
+
+    _kuma_api_mod._convert_monitor_input = _safe_convert_monitor_input
+except Exception as _e:
+    logging.debug(f"Could not wrap _convert_monitor_input: {_e}")
 
 # Configuration
 KUMA_URL = os.getenv("KUMA_URL")
@@ -163,6 +182,104 @@ def parse_accepted_status_codes(val):
                                 result.append(r)
     return result if result else None
 
+def extract_tcp_host_and_port(annotations, name=None, namespace=None):
+    """
+    Robustly extracts clean hostname and integer port for TCP monitors.
+    Supports:
+    - uptime-kuma.io/port
+    - uptime-kuma.io/hostname (e.g. 'db', 'db:5432', 'tcp://db:5432')
+    - uptime-kuma.io/host
+    - uptime-kuma.io/url
+    - In-cluster default: {name}.{namespace}.svc.cluster.local:80
+    """
+    raw_port = (
+        annotations.get(f"{ANNOTATION_PREFIX}/port")
+        or annotations.get("port")
+    )
+    port = None
+    if raw_port:
+        try:
+            p = int(str(raw_port).strip())
+            if 1 <= p <= 65535:
+                port = p
+        except ValueError:
+            pass
+
+    raw_target = (
+        annotations.get(f"{ANNOTATION_PREFIX}/hostname")
+        or annotations.get(f"{ANNOTATION_PREFIX}/host")
+        or annotations.get(f"{ANNOTATION_PREFIX}/url")
+        or ""
+    ).strip()
+
+    hostname = None
+    if raw_target:
+        if "://" in raw_target:
+            target_str = raw_target
+        else:
+            target_str = "//" + raw_target
+        try:
+            parsed = urllib.parse.urlsplit(target_str)
+            hostname = parsed.hostname
+            if parsed.port and not port:
+                port = parsed.port
+        except Exception:
+            hostname = raw_target
+
+    if hostname and ":" in hostname:
+        parts = hostname.split(":")
+        hostname = parts[0]
+        if not port and len(parts) > 1 and parts[1].isdigit():
+            try:
+                p = int(parts[1])
+                if 1 <= p <= 65535:
+                    port = p
+            except ValueError:
+                pass
+
+    if not hostname:
+        if name and namespace:
+            hostname = f"{name}.{namespace}.svc.cluster.local"
+        elif name:
+            hostname = name
+
+    if not port:
+        port = 80
+
+    return hostname, int(port)
+
+def extract_host_target(annotations, name=None, namespace=None):
+    """Extracts clean hostname for DNS or Ping monitors."""
+    raw_target = (
+        annotations.get(f"{ANNOTATION_PREFIX}/hostname")
+        or annotations.get(f"{ANNOTATION_PREFIX}/host")
+        or annotations.get(f"{ANNOTATION_PREFIX}/url")
+        or ""
+    ).strip()
+
+    hostname = None
+    if raw_target:
+        if "://" in raw_target:
+            target_str = raw_target
+        else:
+            target_str = "//" + raw_target
+        try:
+            parsed = urllib.parse.urlsplit(target_str)
+            hostname = parsed.hostname
+        except Exception:
+            hostname = raw_target
+
+    if hostname and ":" in hostname:
+        hostname = hostname.split(":")[0]
+
+    if not hostname:
+        if name and namespace:
+            hostname = f"{name}.{namespace}.svc.cluster.local"
+        elif name:
+            hostname = name
+
+    return hostname
+
 def parse_annotations(annotations, name=None, namespace=None):
     if not annotations:
         return None
@@ -182,16 +299,49 @@ def parse_annotations(annotations, name=None, namespace=None):
     )
     accepted_statuscodes = parse_accepted_status_codes(status_codes_raw)
 
+    raw_type = str(annotations.get(f"{ANNOTATION_PREFIX}/type", "http")).lower().strip()
+    if raw_type in ("tcp", "port", "tcp-port", "tcpport"):
+        monitor_type = "tcp"
+    elif raw_type in ("dns",):
+        monitor_type = "dns"
+    elif raw_type in ("ping", "icmp"):
+        monitor_type = "ping"
+    else:
+        monitor_type = "http"
+
     try:
+        url = None
+        hostname = None
+        port = None
+        dns_server = None
+
+        if monitor_type == "tcp":
+            hostname, port = extract_tcp_host_and_port(annotations, name=name, namespace=namespace)
+        elif monitor_type in ("dns", "ping"):
+            hostname = extract_host_target(annotations, name=name, namespace=namespace)
+            raw_port = annotations.get(f"{ANNOTATION_PREFIX}/port")
+            port = int(str(raw_port).strip()) if raw_port and str(raw_port).strip().isdigit() else (53 if monitor_type == "dns" else None)
+            if monitor_type == "dns":
+                dns_server = annotations.get(f"{ANNOTATION_PREFIX}/dns-server") or annotations.get(f"{ANNOTATION_PREFIX}/dns-resolve-server") or "1.1.1.1"
+        else:
+            url = annotations.get(f"{ANNOTATION_PREFIX}/url")
+            if not url:
+                raw_host = annotations.get(f"{ANNOTATION_PREFIX}/hostname") or annotations.get(f"{ANNOTATION_PREFIX}/host")
+                if raw_host:
+                    url = f"http://{raw_host}"
+                elif name and namespace:
+                    url = f"http://{name}.{namespace}.svc.cluster.local"
+
         config = {
             "name": custom_name or default_name,
             "default_name": default_name,
             "namespace": namespace,
             "resource_name": name,
-            "type": annotations.get(f"{ANNOTATION_PREFIX}/type", "http").lower(),
-            "url": annotations.get(f"{ANNOTATION_PREFIX}/url"),
-            "hostname": annotations.get(f"{ANNOTATION_PREFIX}/hostname"),
-            "port": int(annotations.get(f"{ANNOTATION_PREFIX}/port", 80)) if annotations.get(f"{ANNOTATION_PREFIX}/port") else None,
+            "type": monitor_type,
+            "url": url,
+            "hostname": hostname,
+            "port": port,
+            "dns_server": dns_server,
             "interval": int(annotations.get(f"{ANNOTATION_PREFIX}/interval", 60)),
             "maxretries": int(annotations.get(f"{ANNOTATION_PREFIX}/retries", 3)),
             "notifications": [n.strip() for n in annotations.get(f"{ANNOTATION_PREFIX}/notifications", "").split(",") if n.strip()],
@@ -230,6 +380,7 @@ def sync_monitor(api, monitor_name, config, logger):
     type_map = {
         "http": MonitorType.HTTP,
         "tcp": MonitorType.PORT,
+        "port": MonitorType.PORT,
         "ping": MonitorType.PING,
         "dns": MonitorType.DNS
     }
@@ -261,8 +412,9 @@ def sync_monitor(api, monitor_name, config, logger):
         except Exception as e:
             logger.error(f"Error resolving group '{group_name}': {e}")
 
+    target_type = type_map.get(config["type"], MonitorType.HTTP)
     args = {
-        "type": type_map.get(config["type"], MonitorType.HTTP),
+        "type": target_type,
         "name": monitor_name,
         "description": k8s_tag,
         "interval": config["interval"],
@@ -272,24 +424,48 @@ def sync_monitor(api, monitor_name, config, logger):
     }
 
     if config["type"] == "http":
-        if not config["url"]:
+        if not config.get("url"):
              logger.error(f"URL missing for {monitor_name}")
              return
         args["url"] = config["url"]
         args["accepted_statuscodes"] = config.get("accepted_statuscodes") or ["200-299"]
-    else:
-        if not config["hostname"]:
-             logger.error(f"Hostname missing for {monitor_name}")
+    elif config["type"] in ("tcp", "port"):
+        if not config.get("hostname"):
+             logger.error(f"Hostname missing for TCP monitor {monitor_name}")
              return
         args["hostname"] = config["hostname"]
-        if config["type"] == "tcp":
-            args["port"] = config["port"] or 80
+        args["port"] = int(config.get("port") or 80)
+    elif config["type"] == "dns":
+        if not config.get("hostname"):
+             logger.error(f"Hostname missing for DNS monitor {monitor_name}")
+             return
+        args["hostname"] = config["hostname"]
+        args["port"] = int(config.get("port") or 53)
+        args["dns_resolve_server"] = config.get("dns_server") or "1.1.1.1"
+        args["dns_resolve_type"] = "A"
+    elif config["type"] == "ping":
+        if not config.get("hostname"):
+             logger.error(f"Hostname missing for Ping monitor {monitor_name}")
+             return
+        args["hostname"] = config["hostname"]
 
     if existing:
-        logger.info(f"UPDATING monitor: {monitor_name}")
+        existing_type = existing.get('type')
+        # If monitor type changed (e.g. from HTTP to TCP/PORT), delete old monitor and recreate
+        # to ensure clean schema and avoid corrupt parameter state in Uptime Kuma
+        if existing_type != target_type and str(existing_type).lower() != str(target_type).lower():
+            logger.info(f"Monitor type changed from '{existing_type}' to '{target_type}'. Recreating monitor: {monitor_name}")
+            try:
+                api.delete_monitor(existing['id'])
+            except Exception as e:
+                logger.warning(f"Error deleting monitor {existing['id']} during type change: {e}")
+            existing = None
+
+    if existing:
+        logger.info(f"UPDATING monitor: {monitor_name} (type: {config['type']})")
         api.edit_monitor(existing['id'], **args)
     else:
-        logger.info(f"CREATING monitor: {monitor_name}")
+        logger.info(f"CREATING monitor: {monitor_name} (type: {config['type']})")
         try:
             api.add_monitor(**args, conditions=[])
         except TypeError:
@@ -382,6 +558,7 @@ def reconcile(name, namespace, annotations, logger, old=None, body=None, **kwarg
                 if (m.get('description') and m['description'].startswith(k8s_tag))
                 or m.get('name') in candidates
                 or (m.get('url') and svc_pattern in m['url'])
+                or (m.get('hostname') and svc_pattern in m['hostname'])
             ]
             for m in to_delete:
                 logger.info(f"Removing monitor for disabled {kind.lower()} {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
@@ -413,6 +590,7 @@ def on_delete(name, namespace, annotations, logger, body=None, **kwargs):
             if (m.get('description') and m['description'].startswith(k8s_tag))
             or m.get('name') in candidates
             or (m.get('url') and svc_pattern in m['url'])
+            or (m.get('hostname') and svc_pattern in m['hostname'])
         ]
         for m in to_delete:
             logger.info(f"Deleting monitor for deleted {kind.lower()} {namespace}/{name}: '{m['name']}' (ID: {m['id']})")
