@@ -223,12 +223,14 @@ def main():
         forward = PortForward(ns, kuma_name, port, kubeconfig)
         forward.start()
         url = forward.url
-        kuma = ForwardedKuma(url, timeout=2)
 
         def setup_ready():
+            nonlocal kuma
             try:
+                if kuma is None:
+                    kuma = ForwardedKuma(url, timeout=2)
                 return kuma.need_setup()
-            except UptimeKumaException:
+            except (UptimeKumaException, SocketConnectionError):
                 return False
 
         wait_for(setup_ready, "Kuma setup RPC readiness", 60)

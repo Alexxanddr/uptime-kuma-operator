@@ -52,12 +52,13 @@ def live_kuma():
             if time.monotonic() > deadline:
                 raise TimeoutError("Disposable Kuma did not start")
             time.sleep(1)
-        api = UptimeKumaApi(url, timeout=2)
-        # The Socket.IO connection can complete before Kuma registers setup.
+        # HTTP readiness can precede Socket.IO itself, as well as setup registration.
         # Probe a read-only RPC until handler registration is complete.
         deadline = time.monotonic() + 60
         while True:
             try:
+                if api is None:
+                    api = UptimeKumaApi(url, timeout=2)
                 assert api.need_setup(), "Disposable Kuma must be fresh"
                 break
             except UptimeKumaException:
@@ -220,3 +221,37 @@ def test_real_status_page_preservation_and_lifecycle(live_kuma, body):
         for id_ in (manual, child, parent):
             if id_ is not None:
                 api.delete_monitor(id_)
+
+
+def test_fixture_retries_socket_startup_and_cleans_up(monkeypatch):
+    from types import SimpleNamespace
+    import sys
+
+    module = sys.modules[__name__]
+    monkeypatch.setenv("RUN_KUMA_INTEGRATION", "1")
+    commands = []
+    monkeypatch.setattr(module.subprocess, "run", lambda args, **_: commands.append(args))
+    monkeypatch.setattr(module.requests, "get", lambda *_args, **_kwargs: SimpleNamespace(status_code=200))
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    attempts = []
+    api = SimpleNamespace(
+        need_setup=lambda: True,
+        setup=lambda *_: None,
+        login=lambda *_: None,
+        disconnect=lambda: attempts.append("disconnect"),
+    )
+
+    def connect(*_args, **_kwargs):
+        attempts.append("connect")
+        if attempts.count("connect") == 1:
+            raise UptimeKumaException("Socket.IO returns 404 during startup")
+        return api
+
+    monkeypatch.setattr(module, "UptimeKumaApi", connect)
+    fixture = live_kuma.__wrapped__()
+    assert next(fixture) is api
+    assert attempts == ["connect", "connect"]
+    fixture.close()
+    assert attempts[-1] == "disconnect"
+    assert commands[0][:2] == ["docker", "run"]
+    assert commands[-1][:4] == ["docker", "rm", "-f", "-v"]
