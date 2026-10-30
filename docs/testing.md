@@ -13,7 +13,7 @@ The runner prepares Python 3.11 and pinned dependencies, then runs:
 
 1. Ruff lint and formatting.
 2. The complete Python suite, including real Kuma 2.0.2 integration and coverage.
-3. Real Kuma 1.23.16 integration.
+3. Real Kuma 1.23.16 integration (CI also covers 2.5.8).
 4. Strict Kubernetes manifest schema validation.
 5. Python wheel/sdist build and runtime dependency audit.
 6. Dockerfile validation, container build, and a non-root/read-only runtime check.
@@ -109,7 +109,7 @@ docker build --check .
 | References resolved before mutation; preserve unrelated settings | `tests/test_reconciler.py`, `tests/test_integration.py` |
 | Lost create/delete acknowledgements and outage recovery | `tests/test_reconciler.py` |
 | Session serialization, reauthentication, bounded retry, state and cleanup | `tests/test_client_handlers.py` |
-| Actual HTTP/TCP/ping/DNS lifecycle, groups and notifications | `tests/test_integration.py` on both Kuma versions |
+| Actual HTTP/TCP/ping/DNS lifecycle, groups and notifications | `tests/test_integration.py` on the CI Kuma version matrix |
 | Actual API watches, finalizers, invalid configuration, rename, drift and cleanup | `scripts/e2e.py` on all three workload kinds |
 | Deployment/RBAC/Secret contracts and compatibility entrypoint | `tests/test_manifests.py` |
 | Documentation links, runnable examples, portable public entrypoints | `tests/test_repository.py` |
@@ -130,4 +130,4 @@ use zero replicas or an impossible DaemonSet node selector.
 GitHub Actions runs checks and E2E on every pull request and main push, using a
 Kind cluster owned by its runner. It does not require access to a maintainer's
 cluster. Container vulnerability scans run periodically and gate releases;
-release validation also runs both Kuma versions and E2E before publication.
+release validation also runs the Kuma version matrix and E2E before publication.

@@ -18,6 +18,7 @@ jobs:
       - run: pytest --cov --cov-report=xml
       - run: RUN_KUMA_INTEGRATION=1 pytest tests/test_integration.py
       - run: RUN_KUMA_INTEGRATION=1 KUMA_TEST_IMAGE=louislam/uptime-kuma:1.23.16 pytest tests/test_integration.py
+      - run: RUN_KUMA_INTEGRATION=1 KUMA_TEST_IMAGE=louislam/uptime-kuma:2.5.8 pytest tests/test_integration.py
       - run: pip-audit -r requirements.txt --no-deps --disable-pip
       - run: python scripts/validate_manifests.py
       - run: python -m build

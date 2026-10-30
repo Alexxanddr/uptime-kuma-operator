@@ -3,7 +3,7 @@
 ## Exercised combinations
 
 The automated matrix uses CPython 3.11, the pinned client/framework resolution in
-`requirements.txt`, and real Uptime Kuma **1.23.16** and **2.0.2** instances. E2E
+`requirements.txt`, and real Uptime Kuma **1.23.16**, **2.0.2**, and **2.5.8** instances. E2E
 uses Kuma 2.0.2 and Kubernetes `apps/v1` workloads. Manifest schemas are validated
 against Kubernetes 1.32.0; this is a schema target, not a claim of a full Kubernetes
 version matrix. Consult actual run reports for the environments exercised.
