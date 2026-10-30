@@ -216,3 +216,29 @@ def test_health_probe_responds_when_handler_workers_are_saturated():
         finally:
             release.set()
             occupied.result()
+
+
+def test_controller_state_does_not_trigger_desired_state_changes(body, monkeypatch):
+    import copy
+
+    for key, value in [("KUMA_URL", "http://test"), ("KUMA_USER", "u"), ("KUMA_PASS", "p")]:
+        monkeypatch.setenv(key, value)
+    settings = kopf.OperatorSettings()
+    handlers.startup(settings)
+    storage = settings.persistence.diffbase_storage
+    original = storage.build(body=kopf.Body(body))
+    observed = copy.deepcopy(body)
+    observed["metadata"]["generation"] += 1
+    observed["metadata"]["annotations"].update(
+        {
+            "uptime-kuma.io/managed": "true",
+            "uptime-kuma.io/state": "unchanged",
+            "uptime-kuma.io/config-hash": "recorded",
+            "uptime-kuma.io/observed-generation": "2",
+            "uptime-kuma.io/error": "old error",
+        }
+    )
+    assert storage.build(body=kopf.Body(observed)) == original
+    assert observed["metadata"]["annotations"]["uptime-kuma.io/managed"] == "true"
+    observed["metadata"]["annotations"]["uptime-kuma.io/url"] = "https://changed.example.com"
+    assert storage.build(body=kopf.Body(observed)) != original

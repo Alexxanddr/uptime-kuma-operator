@@ -62,6 +62,11 @@ or arbitrary remote error text are stored in Kubernetes. Periodic resync default
 to 300 seconds. Repeated desired state does not issue edits. Only configured
 fields are managed; the client merges unrelated existing monitor settings.
 
+Controller-generated `managed`, `state`, `error`, `config-hash`, and
+`observed-generation` annotations are excluded from the diff base. They are
+outputs, not desired inputs. This prevents annotation/generation feedback loops
+on Deployments while still detecting changes to user configuration.
+
 ## Operations and limits
 
 Run one instance per watched scope and Kuma account. The Deployment uses Recreate,

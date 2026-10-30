@@ -81,7 +81,10 @@ The following suffixes are reserved under the configured annotation prefix:
 | `config-hash` | SHA-256 of normalized desired monitor configuration |
 | `observed-generation` | Last successfully observed workload generation |
 
-Generation alone is insufficient because annotation edits need not increment it;
+Deployment generation can also advance when its annotations change; the stored
+observed generation is the value read before the controller writes its state.
+Generated state annotations are excluded from reconciliation change detection.
+Generation alone is insufficient to identify desired monitor configuration;
 the effective configuration hash also records desired-state changes. A previous
 successful state can remain while a later attempt fails; inspect errors and
 warning events together. Transient integration failures are reported through

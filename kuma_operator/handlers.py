@@ -14,6 +14,22 @@ manager = None
 outcomes = Counter()
 
 
+class MonitorDiffBaseStorage(kopf.AnnotationsDiffBaseStorage):
+    """Controller output must not feed back into desired-state change detection."""
+
+    def build(self, *, body, extra_fields=None):
+        essence = super().build(body=body, extra_fields=extra_fields)
+        self.remove_annotations(
+            essence,
+            {
+                f"{PREFIX}/{key}"
+                for key in ("managed", "state", "error", "config-hash", "observed-generation")
+            },
+        )
+        self.remove_empty_stanzas(essence)
+        return essence
+
+
 def selected(body, **_):
     annotations = effective_annotations(body)
     return (
@@ -32,7 +48,7 @@ def startup(settings, **_):
     storage_prefix = "kopf.zalando.org" if PREFIX == "uptime-kuma.io" else f"kopf.{PREFIX}"
     settings.persistence.finalizer = f"{storage_prefix}/KopfFinalizerMarker"
     settings.persistence.progress_storage = kopf.AnnotationsProgressStorage(prefix=storage_prefix)
-    settings.persistence.diffbase_storage = kopf.AnnotationsDiffBaseStorage(prefix=storage_prefix)
+    settings.persistence.diffbase_storage = MonitorDiffBaseStorage(prefix=storage_prefix)
     settings.posting.level = logging.WARNING
 
 

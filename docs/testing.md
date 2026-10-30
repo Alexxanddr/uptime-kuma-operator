@@ -108,7 +108,7 @@ docker build --check .
 | UID/kind/namespace/name collisions, safe legacy adoption | `tests/test_reconciler.py` |
 | References resolved before mutation; preserve unrelated settings | `tests/test_reconciler.py`, `tests/test_integration.py` |
 | Lost create/delete acknowledgements and outage recovery | `tests/test_reconciler.py` |
-| Session serialization, reauthentication, bounded retry, state, cleanup and health under worker saturation | `tests/test_client_handlers.py` |
+| Session serialization, reauthentication, bounded retry, state/output feedback isolation, cleanup and health under worker saturation | `tests/test_client_handlers.py` |
 | Actual HTTP/TCP/ping/DNS lifecycle, groups and notifications | `tests/test_integration.py` on the CI Kuma version matrix |
 | Actual API watches, finalizers, invalid configuration, rename, drift and cleanup | `scripts/e2e.py` on all three workload kinds |
 | Deployment/RBAC/Secret contracts and compatibility entrypoint | `tests/test_manifests.py` |

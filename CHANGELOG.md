@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.2 — 2026-10-30
+
+- Exclude controller-generated state annotations from desired-state change
+  detection, preventing status/generation feedback loops on Deployments.
+- Preserve change detection for user annotations while retaining the existing
+  framework storage keys and state interface.
+
 ## 1.1.1 — 2026-10-30
 
 - Run health probes asynchronously so reconciliation worker saturation cannot
