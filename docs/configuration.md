@@ -21,6 +21,7 @@ for each individual key. Kubernetes annotation values must be strings.
 | `status-codes` | Accepted HTTP codes/ranges, CSV or JSON array | `200-299` |
 | `notifications` | Comma-separated existing notification names | None |
 | `group` | Existing parent group name or numeric ID | None |
+| `status-page` | Explicit opt-in to the configured status page; see [status pages](status-pages.md) | `false` |
 | `adopt-legacy` | Explicit opt-in to claim a verified exact legacy marker | `false` |
 
 Boolean and type values accept case normalization. Invalid enabled values,
@@ -63,6 +64,10 @@ resources. For ping/DNS, prefer `hostname` over the legacy `url` field. See
 | `KUMA_TIMEOUT` | Per-client-operation timeout in seconds, greater than 0 and at most 300 | `10` |
 | `KUMA_RESYNC_INTERVAL` | Drift reconciliation interval, 1–86400 seconds | `300` |
 | `KUMA_ANNOTATION_PREFIX` | Application annotation prefix; a custom prefix also isolates framework persistence | `uptime-kuma.io` |
+| `KUMA_STATUS_PAGE_SLUG` | Explicit existing page slug; configure with ID and groups | Disabled |
+| `KUMA_STATUS_PAGE_ID` | Expected existing page ID | Disabled |
+| `KUMA_STATUS_PAGE_MONITORS` | Optional JSON list of explicitly approved existing monitor IDs; workload `status-page` overrides it | `[]` |
+| `KUMA_STATUS_PAGE_GROUPS` | JSON map of source monitor-group IDs to reserved public-group IDs | Disabled |
 | `LOG_LEVEL` | Root logging level | `INFO` |
 
 Credentials are required at startup. Environment changes require a process

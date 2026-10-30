@@ -120,3 +120,12 @@ operator.py      Compatibility entrypoint for existing deployments
 
 Generated `artifacts/`, build output, coverage, virtual environments, and local
 maintainer settings are outside the version-controlled source layout.
+
+## Optional status pages
+
+`status_page.py` handles whole-page reads, identity checks, conservative membership
+merges and verified saves under the existing session lock. `reconciler.py` invokes
+it after monitor reconciliation and before deleting a monitor. Configuration
+explicitly reserves destination group IDs; there is no name-based adoption or
+automatic group/page creation. See [status pages](status-pages.md) for the ownership
+contract, manual-link refusal and single-writer limitation.

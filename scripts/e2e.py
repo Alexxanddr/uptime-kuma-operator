@@ -193,7 +193,7 @@ def main():
                 kuma_name,
                 {
                     "name": "kuma",
-                    "image": "louislam/uptime-kuma:2.0.2",
+                    "image": "louislam/uptime-kuma:2.5.8",
                     "env": [{"name": "UPTIME_KUMA_DB_TYPE", "value": "sqlite"}],
                     "ports": [{"containerPort": 3001}],
                     "resources": {
@@ -241,6 +241,15 @@ def main():
         forward.close()
         assert kuma.get_monitors() == []
         print("Observer port-forward failure/reconnect PASS", flush=True)
+        parent = kuma.add_monitor(type="group", name="Services")["monitorID"]
+        kuma.add_status_page("services", "Isolated services")
+        page_config = kuma._call("getStatusPage", "services")["config"]
+        page_config["autoRefreshInterval"] = 300
+        result = kuma._call(
+            "saveStatusPage",
+            ("services", page_config, page_config["icon"], [{"name": "Services", "monitorList": []}]),
+        )
+        public_group = result["publicGroupList"][0]["id"]
         mounts = [
             {"name": "source", "mountPath": "/app/operator.py", "subPath": "entrypoint.py"},
             {"name": "source", "mountPath": "/app/requirements.txt", "subPath": "requirements.txt"},
@@ -257,6 +266,9 @@ def main():
                 "KUMA_USER": "test-user",
                 "KUMA_ANNOTATION_PREFIX": PREFIX,
                 "KUMA_RESYNC_INTERVAL": "5",
+                "KUMA_STATUS_PAGE_SLUG": "services",
+                "KUMA_STATUS_PAGE_ID": str(page_config["id"]),
+                "KUMA_STATUS_PAGE_GROUPS": json.dumps({str(parent): public_group}),
                 "PYTHONPATH": "/tmp/deps:/app",
                 "HOME": "/tmp",
                 "USER": "kumaoperator",
@@ -309,7 +321,7 @@ def main():
         )
 
         def monitors():
-            return [m for m in kuma.get_monitors() if m.get("description", "").startswith("k8s:v2:")]
+            return [m for m in kuma.get_monitors() if (m.get("description") or "").startswith("k8s:v2:")]
 
         for kind, plural in [
             ("Deployment", "deployment"),
@@ -322,6 +334,8 @@ def main():
                 PREFIX + "/enabled": "true",
                 PREFIX + "/url": "https://example.com",
                 PREFIX + "/name": name,
+                PREFIX + "/group": str(parent),
+                PREFIX + "/status-page": "true",
             }
             spec = {
                 "selector": {"matchLabels": labels},
@@ -346,6 +360,23 @@ def main():
             wait_for(lambda: any(m["name"] == name for m in monitors()), "Monitor creation " + kind)
             current = next(m for m in monitors() if m["name"] == name)
             id_ = current["id"]
+
+            def public_ids():
+                return [
+                    m["id"]
+                    for g in kuma.get_status_page("services")["publicGroupList"]
+                    for m in g["monitorList"]
+                ]
+
+            wait_for(lambda: id_ in public_ids(), "Status page opt-in " + kind)
+            getattr(apps, "patch_namespaced_" + plural)(
+                name, ns, {"metadata": {"annotations": {PREFIX + "/status-page": "false"}}}
+            )
+            wait_for(lambda: id_ not in public_ids(), "Status page opt-out")
+            getattr(apps, "patch_namespaced_" + plural)(
+                name, ns, {"metadata": {"annotations": {PREFIX + "/status-page": "true"}}}
+            )
+            wait_for(lambda: id_ in public_ids(), "Status page re-publication")
             # Invalid desired state must preserve the monitor.
             getattr(apps, "patch_namespaced_" + plural)(
                 name, ns, {"metadata": {"annotations": {PREFIX + "/interval": "invalid"}}}
@@ -363,7 +394,9 @@ def main():
                 ns,
                 {"metadata": {"annotations": {PREFIX + "/interval": "60", PREFIX + "/name": renamed}}},
             )
-            wait_for(lambda: kuma.get_monitor(id_)["name"] == renamed, "Rename recovery")
+            # A failed Kopf invocation can retain its documented 300s retry
+            # deadline even when annotations are corrected in the meantime.
+            wait_for(lambda: kuma.get_monitor(id_)["name"] == renamed, "Rename recovery", 360)
             kuma.edit_monitor(id_, interval=90)
             wait_for(lambda: kuma.get_monitor(id_)["interval"] == 60, "External drift recovery")
             # Both disabling and resource deletion are exercised.
@@ -379,6 +412,7 @@ def main():
                 id_ = next(m["id"] for m in monitors() if m["name"] == renamed)
             getattr(apps, "delete_namespaced_" + plural)(name, ns)
             wait_for(lambda: all(m["id"] != id_ for m in monitors()), "Finalizer cleanup")
+            wait_for(lambda: id_ not in public_ids(), "Status page finalizer cleanup")
 
             def resource_gone():
                 try:

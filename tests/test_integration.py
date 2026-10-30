@@ -142,3 +142,81 @@ def test_real_type_change_preserves_monitor_id(live_kuma, body):
         assert observed["name"] == cfg["name"]
     finally:
         reconcile(live_kuma, body, None, deleting=True)
+
+
+@pytest.mark.integration
+def test_real_status_page_preservation_and_lifecycle(live_kuma, body):
+    from kuma_operator.config import StatusPageSettings
+    from kuma_operator.status_page import read, sync
+
+    if str(live_kuma._parsed_version()) != "2.5.8":
+        pytest.skip("Status page writes are deliberately limited to Kuma 2.5.8")
+    api = live_kuma
+    slug = "integration-services"
+    parent = child = manual = None
+    try:
+        parent = api.add_monitor(type="group", name="Parent")["monitorID"]
+        child = api.add_monitor(type="group", name="Child", parent=parent)["monitorID"]
+        manual = api.add_monitor(type="http", name="Manual", url="https://example.com")["monitorID"]
+        api.add_status_page(slug, "Integration services")
+        config = api._call("getStatusPage", slug)["config"]
+        config.update(autoRefreshInterval=300, customCSS="body { color: inherit; }", footerText="Keep me")
+        api._call(
+            "saveStatusPage",
+            (
+                slug,
+                config,
+                config["icon"],
+                [
+                    dict(name="Parent", monitorList=[]),
+                    dict(name="Parent / Child", monitorList=[]),
+                    dict(
+                        name="Manual",
+                        monitorList=[dict(id=manual, sendUrl=True, url="https://example.com/manual")],
+                    ),
+                ],
+            ),
+        )
+        settings = StatusPageSettings(slug, config["id"], {})
+        baseline_config, groups = read(api, settings)
+        settings = StatusPageSettings(slug, config["id"], {parent: groups[0]["id"], child: groups[1]["id"]})
+        body["metadata"]["annotations"].update(
+            {"uptime-kuma.io/status-page": "true", "uptime-kuma.io/group": str(parent)}
+        )
+        cfg = parse(body)
+        reconcile(api, body, cfg, status_page=settings)
+        monitor = next(m for m in api.get_monitors() if m["name"] == cfg["name"])
+        assert sync(api, settings, monitor, api.get_monitors(), True) == "unchanged"
+        cfg.update(group=str(child), name="renamed-public-service")
+        reconcile(api, body, cfg, status_page=settings)
+        observed_config, observed = read(api, settings)
+        assert observed_config == baseline_config
+        assert not observed[0]["monitorList"]
+        assert observed[1]["monitorList"][0]["id"] == monitor["id"]
+        assert observed[1]["monitorList"][0]["sendUrl"] == 0
+        assert "url" not in observed[1]["monitorList"][0]
+        assert observed[2] == groups[2]
+        api.edit_monitor(parent, name="Renamed parent")
+        reconcile(api, body, cfg, status_page=settings)
+        assert read(api, settings)[1][1]["name"] == "Renamed parent / Child"
+        api.pause_monitor(monitor["id"])
+        reconcile(api, body, cfg, status_page=settings)
+        assert not read(api, settings)[1][1]["monitorList"]
+        api.resume_monitor(monitor["id"])
+        reconcile(api, body, cfg, status_page=settings)
+        cfg["publish"] = False
+        reconcile(api, body, cfg, status_page=settings)
+        assert not read(api, settings)[1][1]["monitorList"]
+        cfg["publish"] = True
+        reconcile(api, body, cfg, status_page=settings)
+        reconcile(api, body, None, status_page=settings)
+        assert not read(api, settings)[1][1]["monitorList"]
+        assert read(api, settings)[0] == baseline_config
+    finally:
+        # Only this fixture's page and monitors; never accepts a production URL.
+        if any(p["slug"] == slug for p in api.get_status_pages()):
+            api.delete_status_page(slug)
+        reconcile(api, body, None)
+        for id_ in (manual, child, parent):
+            if id_ is not None:
+                api.delete_monitor(id_)

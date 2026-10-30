@@ -49,17 +49,21 @@ def normalize(key, value):
     return value
 
 
-def reconcile(api, body, config, deleting=False):
+def reconcile(api, body, config, deleting=False, status_page=None):
     monitors = api.get_monitors()
     meta = body["metadata"]
     adopt = meta.get("annotations", {}).get(f"{PREFIX}/adopt-legacy") == "true"
     existing = owned_monitor(monitors, body, allow_legacy=adopt and not deleting and config is not None)
     if deleting or config is None:
         if existing:
+            if status_page:
+                from .status_page import sync
+
+                sync(api, status_page, existing, monitors, include=False)
             api.delete_monitor(existing["id"])
             return "deleted"
         return "absent"
-    args = {k: v for k, v in config.items() if k not in ("notifications", "group")}
+    args = {k: v for k, v in config.items() if k not in ("notifications", "group", "publish")}
     args["description"] = identity(body)
     args["notificationIDList"] = []
     if config["notifications"]:
@@ -79,6 +83,11 @@ def reconcile(api, body, config, deleting=False):
         if len(groups) != 1:
             raise LookupError("Parent group missing or ambiguous")
         args["parent"] = groups[0]["id"]
+    publish = config.get("publish")
+    if publish is None:
+        publish = bool(status_page and existing and existing["id"] in status_page.monitors)
+    if status_page and publish and (args["parent"] or 0) not in status_page.groups:
+        raise InvalidConfig("Status page parent group has no explicit mapping")
     # A pre-existing duplicate display name must not prevent managing an exact
     # owner. Only creation or renaming can introduce a new name collision.
     changing_name = existing is None or existing["name"] != args["name"]
@@ -89,9 +98,18 @@ def reconcile(api, body, config, deleting=False):
     if existing:
         # get_monitor returns complete configuration, unlike some list payloads.
         observed = api.get_monitor(existing["id"])
-        if all(normalize(k, observed.get(k)) == normalize(k, v) for k, v in args.items()):
-            return "unchanged"
-        api.edit_monitor(existing["id"], **args)
-        return "updated"
-    api.add_monitor(**args)
-    return "created"
+        result = "unchanged"
+        if not all(normalize(k, observed.get(k)) == normalize(k, v) for k, v in args.items()):
+            api.edit_monitor(existing["id"], **args)
+            result = "updated"
+        monitor_id = existing["id"]
+    else:
+        monitor_id = api.add_monitor(**args)["monitorID"]
+        result = "created"
+    if status_page:
+        from .status_page import sync
+
+        monitors = api.get_monitors()
+        current = next(m for m in monitors if m["id"] == monitor_id)
+        sync(api, status_page, current, monitors, include=publish)
+    return result

@@ -98,3 +98,11 @@ Start at the [documentation index](docs/README.md). It includes
 Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md).
 Report vulnerabilities using [SECURITY.md](SECURITY.md).
 This project is licensed under the [MIT License](LICENSE).
+
+## Optional status pages
+
+Publish explicitly opted-in UID-owned monitors to a dedicated status page on
+Kuma 2.5.8. Group ID mappings preserve flat groups or show nested source paths
+as flat titles. Existing monitor management is unchanged when disabled. Read
+[status page synchronization](docs/status-pages.md) before activation; one writer
+is required and manual hidden links block lossy saves.

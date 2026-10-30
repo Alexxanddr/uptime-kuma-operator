@@ -15,11 +15,53 @@ class InvalidConfig(ValueError):
 
 
 @dataclass(frozen=True)
+class StatusPageSettings:
+    slug: str
+    id: int
+    groups: dict[int, int]
+    monitors: frozenset[int] = frozenset()
+
+    @classmethod
+    def from_env(cls):
+        keys = ("KUMA_STATUS_PAGE_SLUG", "KUMA_STATUS_PAGE_ID", "KUMA_STATUS_PAGE_GROUPS")
+        values = [os.getenv(key, "") for key in keys]
+        if not any(values):
+            if os.getenv("KUMA_STATUS_PAGE_MONITORS"):
+                raise InvalidConfig("Status page monitor allowlist requires page configuration")
+            return None
+        try:
+            slug, page_id, raw = values
+            groups = json.loads(raw)
+            if (
+                not slug
+                or not all(c.isalnum() or c == "-" for c in slug)
+                or slug != slug.lower()
+                or int(page_id) <= 0
+                or not isinstance(groups, dict)
+                or not groups
+                or any(not k.isdecimal() or type(v) is not int or v <= 0 for k, v in groups.items())
+            ):
+                raise ValueError
+            groups = {int(k): v for k, v in groups.items()}
+            if len(groups) != len(json.loads(raw)) or len(set(groups.values())) != len(groups):
+                raise ValueError
+            monitor_ids = json.loads(os.getenv("KUMA_STATUS_PAGE_MONITORS", "[]"))
+            if not isinstance(monitor_ids, list) or any(type(v) is not int or v <= 0 for v in monitor_ids):
+                raise ValueError
+            return cls(slug, int(page_id), groups, frozenset(monitor_ids))
+        except (ValueError, TypeError, AttributeError):
+            raise InvalidConfig(
+                "Status page requires a slug, positive ID and unique group ID mapping"
+            ) from None
+
+
+@dataclass(frozen=True)
 class Settings:
     url: str
     username: str
     password: str = field(repr=False)
     timeout: float = 10
+    status_page: StatusPageSettings | None = None
 
     @classmethod
     def from_env(cls):
@@ -34,7 +76,7 @@ class Settings:
                 raise ValueError
         except ValueError:
             raise InvalidConfig("KUMA_TIMEOUT must be in (0, 300]") from None
-        return cls(*values, timeout=timeout)
+        return cls(*values, timeout=timeout, status_page=StatusPageSettings.from_env())
 
 
 def resync_interval():
@@ -91,6 +133,10 @@ def parse(body):
         raise InvalidConfig("enabled must be true or false")
     if enabled == "false":
         return None
+    publish = get("status-page")
+    publish = publish.strip().lower() if publish is not None else None
+    if publish not in (None, "true", "false"):
+        raise InvalidConfig("status-page must be true or false")
     kind = get("type", "http").strip().lower()
     kind = {"port": "tcp", "tcp-port": "tcp", "tcpport": "tcp", "icmp": "ping"}.get(kind, kind)
     if kind not in ("http", "tcp", "ping", "dns"):
@@ -113,6 +159,7 @@ def parse(body):
         maxretries=number("retries", 3, 0, 1000),
         notifications=[n.strip() for n in get("notifications", "").split(",") if n.strip()],
         group=get("group", "").strip(),
+        publish=None if publish is None else publish == "true",
     )
     default_host = f"{meta['name']}.{meta['namespace']}.svc.cluster.local"
     url = get("url", "").strip()

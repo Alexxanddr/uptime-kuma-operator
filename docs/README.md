@@ -23,3 +23,5 @@
 
 Documentation describes the current source tree. Check the image version you
 actually deploy; local validation does not publish an image or install a release.
+
+- [Status page synchronization](status-pages.md): opt-in, ownership, privacy and lifecycle.

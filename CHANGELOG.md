@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-10-30
+
+- Add disabled-by-default status page opt-in, explicit page/group ID mappings,
+  flat full-path titles, preserved ordering and lifecycle cleanup on Kuma 2.5.8.
+- Preserve page configuration including refresh intervals; reject manual links
+  that cannot be safely round-tripped and detect observed concurrent edits.
+- Test real status page saves, recovery and all workload kinds in isolated E2E.
+- Require one writer; do not automatically create, adopt or delete public groups.
+
 ## 1.1.2 — 2026-10-30
 
 - Exclude controller-generated state annotations from desired-state change

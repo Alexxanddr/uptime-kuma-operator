@@ -71,7 +71,13 @@ def handle(body, patch, logger, retry=0, deleting=False, **_):
             patch.metadata.annotations[MANAGED] = "true"
             return
         with manager.session() as api:
-            result = reconcile(api, body, config, deleting=deleting)
+            result = reconcile(
+                api,
+                body,
+                config,
+                deleting=deleting,
+                status_page=getattr(getattr(manager, "settings", None), "status_page", None),
+            )
         outcomes[result] += 1
         if not deleting:
             annotations = patch.metadata.annotations
