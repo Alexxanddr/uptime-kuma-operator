@@ -346,6 +346,64 @@ def main():
             wait_for(resource_gone, "Kubernetes finalizer release")
             print(kind + ": create, invalid config, recovery, rename, drift, delete PASS", flush=True)
         assert not monitors()
+        # Exercise health while more reconciles are pending than Kopf worker
+        # slots. A synchronous probe shares that pool and can starve here.
+        operator_pod = core.list_namespaced_pod(ns, label_selector="app=" + operator_name).items[0]
+
+        def health_under_load():
+            response = core.connect_get_namespaced_pod_proxy_with_path(
+                operator_pod.metadata.name + ":8080", ns, "healthz", _request_timeout=2
+            )
+            assert "configured" in str(response)
+            return True
+
+        load_names = []
+        for index in range(64):
+            name = ns + "-load-" + str(index)
+            body = deployment(
+                name,
+                {
+                    "name": "unused",
+                    "image": "registry.k8s.io/pause:3.10",
+                    "securityContext": {
+                        "allowPrivilegeEscalation": False,
+                        "readOnlyRootFilesystem": True,
+                        "capabilities": {"drop": ["ALL"]},
+                    },
+                },
+                securityContext={
+                    "runAsNonRoot": True,
+                    "runAsUser": 65532,
+                    "seccompProfile": {"type": "RuntimeDefault"},
+                },
+            )
+            body["spec"]["replicas"] = 0
+            body["metadata"]["annotations"] = {
+                PREFIX + "/enabled": "true",
+                PREFIX + "/name": name,
+                PREFIX + "/url": f"http://{kuma_name}:3001",
+            }
+            apps.create_namespaced_deployment(ns, body)
+            load_names.append(name)
+            if index % 8 == 7:
+                health_under_load()
+
+        def all_created():
+            health_under_load()
+            return len(monitors()) == len(load_names)
+
+        wait_for(all_created, "Bulk monitor reconciliation with responsive health", 300)
+        for name in load_names:
+            apps.delete_namespaced_deployment(name, ns)
+
+        def all_cleaned():
+            health_under_load()
+            return not monitors() and not any(
+                d.metadata.name in load_names for d in apps.list_namespaced_deployment(ns).items
+            )
+
+        wait_for(all_cleaned, "Bulk monitor/finalizer cleanup with responsive health", 300)
+        print("64-workload load test: health responsive, reconciliation and cleanup PASS", flush=True)
     except Exception:
         pods = core.list_namespaced_pod(ns).items
         for pod in pods:

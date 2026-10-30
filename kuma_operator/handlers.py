@@ -43,7 +43,7 @@ def shutdown(**_):
 
 
 @kopf.on.probe(id="kuma")
-def probe(**_):
+async def probe(**_):
     return {"configured": manager is not None, "outcomes": dict(outcomes)}
 
 

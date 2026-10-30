@@ -70,7 +70,8 @@ operator installations. Each reconcile lists monitors: this is O(N), suitable
 for the current scope, not an established high-scale performance claim.
 
 `--liveness=http://0.0.0.0:8080/healthz` provides Kopf health plus the configured
-state and process-local outcome counters. Liveness/readiness indicate process
+state and process-local outcome counters. The probe runs asynchronously on the
+event loop, independently of the synchronous reconciliation worker pool. Liveness/readiness indicate process
 availability, not successful authentication to Kuma. Kuma outages should be
 alerted from reconciliation error events/counters. These counters reset on
 restart and are not a Prometheus exporter.

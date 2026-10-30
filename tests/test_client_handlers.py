@@ -128,7 +128,9 @@ def test_startup_shutdown(monkeypatch):
     settings = kopf.OperatorSettings()
     handlers.startup(settings)
     assert isinstance(settings.persistence.progress_storage, kopf.AnnotationsProgressStorage)
-    assert handlers.probe()["configured"]
+    import asyncio
+
+    assert asyncio.run(handlers.probe())["configured"]
     handlers.shutdown()
 
 
@@ -187,3 +189,30 @@ def test_socket_reconnect_requires_new_authenticated_session():
     assert authenticated == [first, second]
     assert first.closed
     manager.close()
+
+
+def test_health_probe_responds_when_handler_workers_are_saturated():
+    import asyncio
+    from kopf._core.actions import invocation
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def block():
+        entered.set()
+        release.wait(5)
+
+    settings = kopf.OperatorSettings()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        settings.execution.executor = pool
+        occupied = pool.submit(block)
+        assert entered.wait(1)
+
+        async def request():
+            return await asyncio.wait_for(invocation.invoke(handlers.probe, settings=settings), 0.5)
+
+        try:
+            assert "configured" in asyncio.run(request())
+        finally:
+            release.set()
+            occupied.result()

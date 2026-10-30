@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 — 2026-10-30
+
+- Run health probes asynchronously so reconciliation worker saturation cannot
+  cause false liveness failures during large initial syncs.
+- Add a deterministic worker-starvation regression and a 64-workload E2E health,
+  reconciliation, and cleanup test.
+
 ## 1.1.0 — 2026-10-30
 
 ### Reliability and safety
