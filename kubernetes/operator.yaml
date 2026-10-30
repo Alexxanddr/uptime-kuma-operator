@@ -19,14 +19,80 @@ spec:
       - name: operator
         image: ghcr.io/alexxanddr/uptime-kuma-operator:latest
         imagePullPolicy: Always
-        command: ["kopf"]
-        args: ["run", "--all-namespaces", "--standalone", "operator.py"]
+        command:
+        - kopf
+        args:
+        - run
+        - --all-namespaces
+        - --standalone
+        - --liveness=http://0.0.0.0:8080/healthz
+        - operator.py
         env:
         - name: KUMA_URL
-          valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: url } }
+          valueFrom:
+            secretKeyRef:
+              name: uptime-kuma-creds
+              key: url
         - name: KUMA_USER
-          valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: user } }
+          valueFrom:
+            secretKeyRef:
+              name: uptime-kuma-creds
+              key: user
         - name: KUMA_PASS
-          valueFrom: { secretKeyRef: { name: uptime-kuma-creds, key: pass } }
+          valueFrom:
+            secretKeyRef:
+              name: uptime-kuma-creds
+              key: pass
         - name: LOG_LEVEL
-          value: "DEBUG"
+          value: INFO
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        ports:
+        - name: health
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          periodSeconds: 5
+          failureThreshold: 24
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
+  strategy:
+    type: Recreate

@@ -1,0 +1,80 @@
+name: Checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check . && ruff format --check .
+      - run: python -m compileall -q kuma_operator
+      - run: pytest --cov --cov-report=xml --cov-report=html
+      - run: python scripts/validate_manifests.py
+      - run: python -m build
+      - run: pip-audit -r requirements.txt --no-deps --disable-pip
+      - run: docker build --check . && docker build -t kumaops:test .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            htmlcov/
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        kuma: ['1.23.16', '2.0.2']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: pytest tests/test_integration.py -v
+        env:
+          RUN_KUMA_INTEGRATION: '1'
+          KUMA_TEST_IMAGE: louislam/uptime-kuma:${{ matrix.kuma }}
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements-dev.txt
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - run: |
+          kind create cluster --name kumaops-ci --kubeconfig "$RUNNER_TEMP/kumaops.kubeconfig"
+      - run: python scripts/e2e.py --run
+        env:
+          KUBECONFIG: ${{ runner.temp }}/kumaops.kubeconfig
+      - if: always()
+        run: kind delete cluster --name kumaops-ci
+  image-security:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t kumaops:scan .
+      - uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: kumaops:scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'

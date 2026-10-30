@@ -1,0 +1,17 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.coverage
+htmlcov
+coverage.xml
+tests
+docs
+.env*
+*.egg-info
+build
+dist
+
+artifacts
+AGENTS.local.md
+*.kubeconfig

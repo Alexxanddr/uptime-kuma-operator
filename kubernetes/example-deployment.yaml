@@ -2,19 +2,13 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sample-app
-  namespace: default
   annotations:
     uptime-kuma.io/enabled: "true"
-    uptime-kuma.io/name: "Sample App Production"
     uptime-kuma.io/type: "http"
-    uptime-kuma.io/url: "https://my-service.default.svc.cluster.local"
-    uptime-kuma.io/status-codes: "200-299, 301, 302"
-    uptime-kuma.io/interval: "60"
-    uptime-kuma.io/retries: "3"
-    uptime-kuma.io/notifications: "Slack Alerts, Email Admins"
-    uptime-kuma.io/group: "Web Services"
+    uptime-kuma.io/url: "https://example.com"
+    uptime-kuma.io/status-codes: "200-299,301,302"
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: sample-app
@@ -23,6 +17,16 @@ spec:
       labels:
         app: sample-app
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-      - name: nginx
-        image: nginx:latest
+        - name: placeholder
+          image: registry.k8s.io/pause:3.10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

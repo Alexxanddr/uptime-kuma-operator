@@ -14,3 +14,15 @@ __pycache__/
 env/
 venv/
 .pytest_cache/
+
+.coverage*
+coverage.xml
+htmlcov/
+*.egg-info/
+.ruff_cache/
+
+artifacts/
+
+# Maintainer-specific instructions and cluster credentials
+AGENTS.local.md
+*.kubeconfig

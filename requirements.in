@@ -1,0 +1,4 @@
+kopf>=1.36.2,<2
+pykube-ng>=23.6.0,<24
+uptime-kuma-api2==2.9.0
+kubernetes>=26.1.0,<38
