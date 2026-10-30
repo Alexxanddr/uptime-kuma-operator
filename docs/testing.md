@@ -40,6 +40,10 @@ watches only that namespace and uses a separate annotation prefix and framework
 persistence/finalizers. Existing workloads and production Kuma data are outside
 the test scope.
 
+The observer automatically restores a failed test port-forward for reads, and
+E2E deliberately drops a tunnel to verify reconnection. Cleanup stops the test
+controller before removing fixture finalizers, preventing reattachment races.
+
 The E2E script can also be run independently:
 
 ```sh

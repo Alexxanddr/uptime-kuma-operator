@@ -18,6 +18,7 @@ from kubernetes import client, config
 from kubernetes.client.exceptions import ApiException
 from uptime_kuma_api import UptimeKumaApi
 from uptime_kuma_api.exceptions import UptimeKumaException
+from socketio.exceptions import ConnectionError as SocketConnectionError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -28,27 +29,80 @@ PREFIX = "kumaops-e2e.test"
 
 
 class ForwardedKuma(UptimeKumaApi):
-    """Avoid WebSocket upgrade across kubectl multiplexed port forwarding."""
+    """Stream events over WebSocket without HTTP polling packet-batch limits."""
 
     def connect(self):
         self.sio.connect(
-            f"{self.url}/socket.io/", transports=["polling"], wait_timeout=self.timeout, headers=self.headers
+            f"{self.url}/socket.io/",
+            transports=["websocket"],
+            wait_timeout=self.timeout,
+            headers=self.headers,
         )
 
 
 class ManagedKuma:
-    def __init__(self, url, password):
+    def __init__(self, url, password, forward):
+        self.forward = forward
         self.manager = KumaManager(Settings(url, "test-user", password, 10), factory=ForwardedKuma)
 
     def __getattr__(self, name):
         def call(*args, **kwargs):
-            with self.manager.session() as api:
-                return getattr(api, name)(*args, **kwargs)
+            for attempt in range(2):
+                if self.forward.ensure():
+                    self.manager.close()
+                try:
+                    with self.manager.session() as api:
+                        return getattr(api, name)(*args, **kwargs)
+                except (UptimeKumaException, SocketConnectionError, OSError):
+                    # Retry reads after restoring a failed test tunnel. Never
+                    # conceal an ambiguous write response by replaying a write.
+                    if attempt or not name.startswith("get_"):
+                        raise
+                    self.manager.close()
+                    self.forward.start()
 
         return call
 
     def disconnect(self):
         self.manager.close()
+
+
+class PortForward:
+    def __init__(self, namespace, service, port, kubeconfig):
+        self.command = ["kubectl", "port-forward", "-n", namespace, "service/" + service, f"{port}:3001"]
+        self.env = {**os.environ, "KUBECONFIG": kubeconfig}
+        self.url = f"http://127.0.0.1:{port}"
+        self.process = None
+
+    def start(self):
+        self.close()
+        self.process = subprocess.Popen(
+            self.command, env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+        def reachable():
+            try:
+                return requests.get(self.url, timeout=2).status_code == 200
+            except requests.RequestException:
+                return False
+
+        wait_for(reachable, "Kuma port-forward", 30)
+
+    def ensure(self):
+        if self.process is None or self.process.poll() is not None:
+            self.start()
+            return True
+        return False
+
+    def close(self):
+        if self.process is not None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=10)
+            self.process = None
 
 
 def wait_for(check, description, seconds=240):
@@ -166,21 +220,9 @@ def main():
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
-        forward = subprocess.Popen(
-            ["kubectl", "port-forward", "-n", ns, "service/" + kuma_name, f"{port}:3001"],
-            env={**os.environ, "KUBECONFIG": kubeconfig},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        url = f"http://127.0.0.1:{port}"
-
-        def reachable():
-            try:
-                return requests.get(url, timeout=2).status_code == 200
-            except requests.RequestException:
-                return False
-
-        wait_for(reachable, "Kuma port-forward", 30)
+        forward = PortForward(ns, kuma_name, port, kubeconfig)
+        forward.start()
+        url = forward.url
         kuma = ForwardedKuma(url, timeout=2)
 
         def setup_ready():
@@ -194,7 +236,11 @@ def main():
         kuma.setup("test-user", password)
         kuma.login("test-user", password)
         kuma.disconnect()
-        kuma = ManagedKuma(url, password)
+        kuma = ManagedKuma(url, password, forward)
+        assert kuma.get_monitors() == []
+        forward.close()
+        assert kuma.get_monitors() == []
+        print("Observer port-forward failure/reconnect PASS", flush=True)
         mounts = [
             {"name": "source", "mountPath": "/app/operator.py", "subPath": "entrypoint.py"},
             {"name": "source", "mountPath": "/app/requirements.txt", "subPath": "requirements.txt"},
@@ -420,14 +466,21 @@ def main():
             except Exception:
                 print("Test client disconnect failed; continuing resource cleanup", flush=True)
         if forward:
-            forward.terminate()
-            try:
-                forward.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                forward.kill()
-                forward.wait(timeout=10)
+            forward.close()
         # Never delete a namespace not carrying this run's unique ownership label.
         if core.read_namespace(ns).metadata.labels.get("kumaops-test") == token:
+            # Stop the test controller before clearing fixture finalizers so
+            # it cannot reattach them during namespace teardown.
+            try:
+                apps.patch_namespaced_deployment(ns + "-operator", ns, {"spec": {"replicas": 0}})
+                wait_for(
+                    lambda: not core.list_namespaced_pod(ns, label_selector="app=" + ns + "-operator").items,
+                    "Test controller shutdown before cleanup",
+                    120,
+                )
+            except ApiException as exc:
+                if exc.status != 404:
+                    raise
             # Only our disposable fixtures: production finalizers are untouched.
             for plural in ("deployment", "stateful_set", "daemon_set"):
                 for resource in getattr(apps, "list_namespaced_" + plural)(ns).items:
