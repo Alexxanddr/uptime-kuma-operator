@@ -19,7 +19,8 @@ flowchart LR
   reconnects. Automatic Socket.IO reconnect is disabled because it does not
   repeat Kuma authentication. Timeout defaults to 10 seconds per client operation.
 - `handlers.py`: resource selection, persistent marker, annotation progress,
-  retries, resync, shutdown and health probe diagnostics.
+  retries, resync, shutdown and health probe diagnostics. The synchronous handler
+  pool is capped at one worker because all remote transactions share the same lock.
 - `operator.py`: compatibility loader for existing CLI arguments. If Python
   discovers it as the stdlib operator module, it delegates to that runtime's
   complete stdlib implementation. Application code lives in the package.

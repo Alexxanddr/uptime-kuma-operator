@@ -85,6 +85,11 @@ def main():
         [python, "-m", "pytest", "tests/test_integration.py", "-v"],
         {"RUN_KUMA_INTEGRATION": "1", "KUMA_TEST_IMAGE": "louislam/uptime-kuma:2.5.8"},
     )
+    run(
+        "integration-kuma-v259",
+        [python, "-m", "pytest", "tests/test_integration.py", "-v"],
+        {"RUN_KUMA_INTEGRATION": "1", "KUMA_TEST_IMAGE": "louislam/uptime-kuma:2.5.9"},
+    )
     run("manifest-schemas", [python, "scripts/validate_manifests.py"])
     run("python-build", [python, "-m", "build"])
     run(

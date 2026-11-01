@@ -1,4 +1,4 @@
-"""Conservative whole-page updates for explicitly reserved groups on Kuma 2.5.8."""
+"""Conservative whole-page updates for explicitly reserved groups on Kuma 2.5.8 and 2.5.9."""
 
 import copy
 import json
@@ -10,8 +10,8 @@ from .config import InvalidConfig
 def read(api, settings):
     # The client drops autoRefreshInterval on save and uses a cached public read.
     # Keep the authenticated configuration intact and bypass the public cache.
-    if str(api._parsed_version()) != "2.5.8":
-        raise InvalidConfig("Status page synchronization requires tested Kuma 2.5.8")
+    if str(api._parsed_version()) not in ("2.5.8", "2.5.9"):
+        raise InvalidConfig("Status page synchronization requires tested Kuma 2.5.8 or 2.5.9")
     config = api._call("getStatusPage", settings.slug)["config"]
     if config["id"] != settings.id or config["slug"] != settings.slug:
         raise InvalidConfig("Status page identity changed")

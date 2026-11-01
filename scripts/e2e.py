@@ -193,7 +193,7 @@ def main():
                 kuma_name,
                 {
                     "name": "kuma",
-                    "image": "louislam/uptime-kuma:2.5.8",
+                    "image": "louislam/uptime-kuma:2.5.9",
                     "env": [{"name": "UPTIME_KUMA_DB_TYPE", "value": "sqlite"}],
                     "ports": [{"containerPort": 3001}],
                     "resources": {

@@ -127,6 +127,7 @@ def test_startup_shutdown(monkeypatch):
         monkeypatch.setenv(key, value)
     settings = kopf.OperatorSettings()
     handlers.startup(settings)
+    assert settings.execution.max_workers == 1
     assert isinstance(settings.persistence.progress_storage, kopf.AnnotationsProgressStorage)
     import asyncio
 

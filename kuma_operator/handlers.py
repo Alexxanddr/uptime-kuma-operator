@@ -43,6 +43,8 @@ def startup(settings, **_):
     global manager
     logging.getLogger().setLevel(getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))
     manager = KumaManager(Settings.from_env())
+    # KumaManager serializes every remote transaction; extra blocked workers only consume memory.
+    settings.execution.max_workers = 1
     settings.peering.standalone = True
     settings.scanning.disabled = True
     storage_prefix = "kopf.zalando.org" if PREFIX == "uptime-kuma.io" else f"kopf.{PREFIX}"

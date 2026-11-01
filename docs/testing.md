@@ -13,7 +13,8 @@ The runner prepares Python 3.11 and pinned dependencies, then runs:
 
 1. Ruff lint and formatting.
 2. The complete Python suite, including real Kuma 2.0.2 integration and coverage.
-3. Real Kuma 1.23.16 and 2.5.8 integration, including status page preservation.
+3. Real Kuma 1.23.16, 2.5.8, and 2.5.9 integration, including status page
+   preservation.
 4. Strict Kubernetes manifest schema validation.
 5. Python wheel/sdist build and runtime dependency audit.
 6. Dockerfile validation, container build, and a non-root/read-only runtime check.
@@ -139,7 +140,7 @@ Kind cluster owned by its runner. It does not require access to a maintainer's
 cluster. Container vulnerability scans run periodically and gate releases;
 release validation also runs the Kuma version matrix and E2E before publication.
 
-Status-page writes are covered on Kuma 2.5.8 only. The v1/2.0.2 integrations
+Status-page writes are covered on Kuma 2.5.8 and 2.5.9. The v1/2.0.2 integrations
 continue to verify monitor management and skip the status-page case. Kubernetes
-E2E uses 2.5.8 and verifies publication, opt-out and finalizer cleanup on all
+E2E uses 2.5.9 and verifies publication, opt-out and finalizer cleanup on all
 three workload kinds. See [status pages](status-pages.md).

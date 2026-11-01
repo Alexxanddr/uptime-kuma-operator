@@ -227,6 +227,8 @@ def test_read_preserves_admin_fields_and_bypasses_cache(monkeypatch):
     assert page.read(api, settings) == (config, [])
     page.read(api, settings)
     assert calls[0]["params"] != calls[1]["params"]
+    api._parsed_version = lambda: "2.5.9"
+    page.read(api, settings)
     api._parsed_version = lambda: "2.0.2"
     with pytest.raises(InvalidConfig):
         page.read(api, settings)

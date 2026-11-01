@@ -3,10 +3,11 @@
 ## Exercised combinations
 
 The automated matrix uses CPython 3.11, the pinned client/framework resolution in
-`requirements.txt`, and real Uptime Kuma **1.23.16**, **2.0.2**, and **2.5.8** instances. E2E
-uses Kuma 2.5.8 and Kubernetes `apps/v1` workloads. Manifest schemas are validated
-against Kubernetes 1.32.0; this is a schema target, not a claim of a full Kubernetes
-version matrix. Consult actual run reports for the environments exercised.
+`requirements.txt`, and real Uptime Kuma **1.23.16**, **2.0.2**, **2.5.8**, and
+**2.5.9** instances. E2E uses Kuma 2.5.9 and Kubernetes `apps/v1` workloads.
+Manifest schemas are validated against Kubernetes 1.32.0; this is a schema
+target, not a claim of a full Kubernetes version matrix. Consult actual run
+reports for the environments exercised.
 
 Other Kuma/Python/Kubernetes versions may work, but upstream compatibility claims
 alone are not treated as test evidence. The runtime uses Kuma's Socket.IO API;
@@ -48,7 +49,7 @@ resources identified by the run before repairing fixture state. There is no
 claim of exhaustive fuzzing, scale certification, multi-process race detection,
 or compatibility with untested versions.
 
-Status page synchronization requires Kuma 2.5.8 and a single writer. Explicit
-reserved group IDs avoid name adoption; group creation/deletion is administrative.
+Status page synchronization requires Kuma 2.5.8 or 2.5.9 and a single writer.
+Explicit reserved group IDs avoid name adoption; group creation/deletion is administrative.
 Manual hidden links cannot be safely reconstructed and block saves outside the
 reserved membership contract. See [status pages](status-pages.md).

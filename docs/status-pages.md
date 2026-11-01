@@ -2,8 +2,8 @@
 
 Status page synchronization is disabled by default. Monitor management remains
 compatible with the existing Kuma version matrix; **status page writes require
-Kuma 2.5.8**. Other server versions are rejected until their save/read contract is
-tested. Use a dedicated page and a single writer for its contents.
+Kuma 2.5.8 or 2.5.9**. Other server versions are rejected until their save/read
+contract is tested. Use a dedicated page and a single writer for its contents.
 
 ## Explicit configuration
 
@@ -113,8 +113,9 @@ as public unless access is independently enforced at the network/proxy layer;
 
 Test changes using the disposable fixture in `tests/test_integration.py`, then
 run `make test` with an explicitly authorized cluster or its default disposable
-Kind cluster. The runner includes real Kuma 2.5.8 status-page tests and Kubernetes
-E2E publication/opt-out/finalizer tests for all three workload kinds. Unit tests
+Kind cluster. The runner includes real Kuma 2.5.8 and 2.5.9 status-page tests
+and Kubernetes E2E publication/opt-out/finalizer tests for all three workload
+kinds. Unit tests
 cover hierarchy, order, manual preservation/refusal, idempotence, partial saves,
 lost acknowledgements and concurrent-change detection. No test accepts a
 production Kuma URL.

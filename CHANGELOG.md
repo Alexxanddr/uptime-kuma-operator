@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 — 2026-11-01
+
+- Limit synchronous handlers to one worker because all Kuma transactions share
+  one serialized session; this avoids memory growth during cluster-wide resumes.
+- Support status-page synchronization on Kuma 2.5.9 after real integration and
+  Kubernetes E2E verification.
+
 ## 1.2.0 — 2026-10-30
 
 - Add disabled-by-default status page opt-in, explicit page/group ID mappings,

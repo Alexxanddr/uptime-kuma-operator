@@ -150,8 +150,8 @@ def test_real_status_page_preservation_and_lifecycle(live_kuma, body):
     from kuma_operator.config import StatusPageSettings
     from kuma_operator.status_page import read, sync
 
-    if str(live_kuma._parsed_version()) != "2.5.8":
-        pytest.skip("Status page writes are deliberately limited to Kuma 2.5.8")
+    if str(live_kuma._parsed_version()) not in ("2.5.8", "2.5.9"):
+        pytest.skip("Status page writes are deliberately limited to tested Kuma 2.5.8 and 2.5.9")
     api = live_kuma
     slug = "integration-services"
     parent = child = manual = None
